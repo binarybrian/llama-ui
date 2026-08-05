@@ -154,7 +154,4 @@ RUN chmod +x /app/entrypoint.sh /usr/local/bin/llama-server
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=5 \
-  CMD curl -sf http://localhost:8080/health || exit 1
-
 ENTRYPOINT ["/app/entrypoint.sh"]
