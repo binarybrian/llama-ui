@@ -45,8 +45,7 @@ base_args=(
   --host "${HOST}" --port "${PORT}"
   -ngl all
   -fa on
-  --fit on
-  --fit-target 256
+  --ctx-size "${CTX_SIZE:-32768}"
   --kv-unified
   --cache-type-k q8_0
   --cache-type-v q5_0

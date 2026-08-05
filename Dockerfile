@@ -137,7 +137,7 @@ RUN cuobjdump --list-elf /opt/llama/bin/llama-server 2>/dev/null | sort -u | hea
 FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgomp1 libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
+        libgomp1 libssl3 ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -154,7 +154,7 @@ RUN chmod +x /app/entrypoint.sh /usr/local/bin/llama-server
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=5 \
   CMD curl -sf http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
