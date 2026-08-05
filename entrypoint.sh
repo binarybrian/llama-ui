@@ -30,7 +30,7 @@ if [[ ! -f "${MODEL_PATH}" ]]; then
   echo "ERROR: model not found at ${MODEL_PATH}" >&2
   exit 2
 fi
-if [[ ! -f "${MMPROJ_PATH}" ]]; then
+if [[ -n "${MMPROJ_PATH}" ]] && [[ ! -f "${MMPROJ_PATH}" ]]; then
   echo "WARN: mmproj not found at ${MMPROJ_PATH}; vision disabled" >&2
   MMPROJ_PATH=""
 fi
@@ -93,8 +93,8 @@ fi
 
 # -----------------------------------------------------------------------------
 # MTP probe: launch in background, wait for /health, fall back on death.
-# Logs go to a tmp file so we can diagnose MTP failures and also stream to
-# stdout so `docker logs` shows progress in real time.
+# All output goes to BOTH stdout (so docker logs sees it live) AND a tmp file
+# (so we can dump it on crash — the pipe may not flush the final error lines).
 # -----------------------------------------------------------------------------
 echo "Starting llama-server with MTP speculative decoding (probe ${MTP_PROBE_SECONDS}s)..."
 LOG=/tmp/llama-mtp-start.log
@@ -104,7 +104,6 @@ LOG=/tmp/llama-mtp-start.log
 ( "${base_args[@]}" "${mtp_args[@]}" ) 2>&1 | tee "${LOG}" &
 pipe_pid=$!
 # The actual llama-server PID is the tee'd process's child; find it.
-# `tee` is PID ${pipe_pid}, llama-server is its stdin producer.
 mtp_pid=$(pgrep -P "${pipe_pid}" -f llama-server | head -1 || echo "")
 
 probe_ok=0
@@ -122,23 +121,34 @@ for _ in $(seq 1 "${MTP_PROBE_SECONDS}"); do
   sleep 1
 done
 
-if [[ "${probe_ok}" == "1" ]]; then
-  echo "MTP speculative decoding active. Server is listening on ${HOST}:${PORT}."
-  # Hand the foreground to the running process; wait until it exits.
-  wait "${mtp_pid}" 2>/dev/null
-  exit $?
+if [[ "${probe_ok}" != "1" ]]; then
+  # MTP failed during startup — kill any straggler and restart without --spec-*.
+  echo "--------------------------------------------------------------------"
+  echo "MTP startup did not succeed within ${MTP_PROBE_SECONDS}s. Last log lines:"
+  tail -n 40 "${LOG}" >&2 || true
+  echo "--------------------------------------------------------------------"
+  echo "Restarting WITHOUT speculative decoding (plain decode)..."
+  [[ -n "${mtp_pid}" ]] && kill "${mtp_pid}" 2>/dev/null || true
+  kill "${pipe_pid}" 2>/dev/null || true
+  wait 2>/dev/null || true
+  sleep 2
+  exec "${base_args[@]}"
 fi
 
-# MTP failed — kill any straggler and restart without --spec-*.
-echo "--------------------------------------------------------------------"
-echo "MTP startup did not succeed within ${MTP_PROBE_SECONDS}s. Last log lines:"
-tail -n 40 "${LOG}" >&2 || true
-echo "--------------------------------------------------------------------"
-echo "Restarting WITHOUT speculative decoding (plain decode)..."
-[[ -n "${mtp_pid}" ]] && kill "${mtp_pid}" 2>/dev/null || true
-kill "${pipe_pid}" 2>/dev/null || true
-wait 2>/dev/null || true
-sleep 2
+# -----------------------------------------------------------------------------
+# MTP startup succeeded — wait for the server to exit.
+# When it crashes (e.g., CUDA OOM during inference), dump the log so docker
+# logs captures the error instead of silently restarting.
+# -----------------------------------------------------------------------------
+echo "MTP speculative decoding active. Server is listening on ${HOST}:${PORT}."
+wait "${mtp_pid}" 2>/dev/null
+exit_code=$?
 
-# exec replaces the shell with llama-server as PID 1
-exec "${base_args[@]}"
+if [[ ${exit_code} -ne 0 ]]; then
+  echo "--------------------------------------------------------------------"
+  echo "llama-server exited with code ${exit_code}. Last log lines:"
+  tail -n 80 "${LOG}" >&2 || true
+  echo "--------------------------------------------------------------------"
+fi
+
+exit ${exit_code}
