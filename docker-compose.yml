@@ -9,7 +9,7 @@
 # bind-mounted read-only from the vega pool — keep them on SSD for fast load.
 services:
   llama-ui:
-    image: ghcr.io/binarybrian/llama-ui:4060ti-mtp-iq2m
+    image: docker.io/binarybrian/llama-ui:4060ti-mtp-iq2m
     container_name: llama-ui
     ports:
       - "8080:8080"

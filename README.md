@@ -35,7 +35,7 @@ decode if the model's MTP layers fail to initialize.
 ```sh
 docker buildx build \
   --platform linux/amd64 \
-  -t ghcr.io/binarybrian/llama-ui:4060ti-mtp-iq2m \
+  -t docker.io/binarybrian/llama-ui:4060ti-mtp-iq2m \
   --push .
 ```
 
