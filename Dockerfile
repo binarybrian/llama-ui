@@ -33,7 +33,7 @@ RUN test -f dist/index.html && test -f dist/build.json && test -d dist/_app \
 # ---------- Stage 2: llama.cpp build (CUDA 12.8 devel) ------------------------
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS builder
 ARG LLAMA_TAG=b10235
-ARG CMAKE_CUDA_ARCHITECTURES=89-real
+ARG CMAKE_CUDA_ARCHITECTURES=89-real;89
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \

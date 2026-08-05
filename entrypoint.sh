@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # llama-server entrypoint with MTP speculative-decoding auto-fallback.
 #
-# Tries MTP first (--spec-type draft-mtp). If the model lacks MTP layers,
-# llama-server dies during startup; we detect that within a probe window
-# and restart without the --spec-* flags.
+# Tries MTP first (--spec-type draft-mtp). If the model lacks MTP layers or
+# the process dies during startup, we detect that within a probe window and
+# restart without the --spec-* flags.
 #
 # Flags mirror /spool/workspace/lmcp/q36-qwable-dau (Qwen3.6-27B DAU profile),
 # adapted for the IQ2_M MTP model on the 4060 Ti 16GB.
@@ -19,8 +19,9 @@ PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 
 # Probe window: how long to wait before deciding MTP startup failed.
-# The 11GB IQ2_M model loads off SSD in ~5-15s; 45s is a safe upper bound.
-MTP_PROBE_SECONDS="${MTP_PROBE_SECONDS:-45}"
+# The 11GB IQ2_M model loading off NFS can take several minutes on a cold
+# read; 600s is a safe upper bound. On TrueNAS with local SSD it'll be ~15s.
+MTP_PROBE_SECONDS="${MTP_PROBE_SECONDS:-600}"
 
 # -----------------------------------------------------------------------------
 # Sanity checks
@@ -35,7 +36,7 @@ if [[ ! -f "${MMPROJ_PATH}" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Build the argument list (shared between MTP and non-MTP invocations)
+# Build the argument list. argv[0] is the binary name; the rest are flags.
 # -----------------------------------------------------------------------------
 base_args=(
   llama-server
@@ -86,36 +87,35 @@ mtp_args=(
 # -----------------------------------------------------------------------------
 TRY_MTP="${TRY_MTP:-1}"
 
-run_server() {
-  # Exec into llama-server in the foreground; this is the final process (PID 1).
-  exec llama-server "$@"
-}
-
 if [[ "${TRY_MTP}" != "1" ]]; then
   echo "TRY_MTP=0; starting without speculative decoding"
-  run_server "${base_args[@]}"
-  exit 0  # unreachable; exec replaces us
+  exec "${base_args[@]}"
 fi
 
 # -----------------------------------------------------------------------------
 # MTP probe: launch in background, wait for /health, fall back on death.
-# We write logs to a tmp file so we can diagnose MTP failures.
+# Logs go to a tmp file so we can diagnose MTP failures and also stream to
+# stdout so `docker logs` shows progress in real time.
 # -----------------------------------------------------------------------------
 echo "Starting llama-server with MTP speculative decoding (probe ${MTP_PROBE_SECONDS}s)..."
 LOG=/tmp/llama-mtp-start.log
 : > "${LOG}"
 
-( "${base_args[@]}" "${mtp_args[@]}" ) >"${LOG}" 2>&1 &
-pid=$!
+# tee to both the log file and stdout so docker logs shows progress
+( "${base_args[@]}" "${mtp_args[@]}" ) 2>&1 | tee "${LOG}" &
+pipe_pid=$!
+# The actual llama-server PID is the tee'd process's child; find it.
+# `tee` is PID ${pipe_pid}, llama-server is its stdin producer.
+mtp_pid=$(pgrep -P "${pipe_pid}" -f llama-server | head -1 || echo "")
 
-# Poll the process: if it dies within the probe window, MTP isn't supported.
 probe_ok=0
 for _ in $(seq 1 "${MTP_PROBE_SECONDS}"); do
-  if ! kill -0 "${pid}" 2>/dev/null; then
+  # Check if the MTP process is still alive
+  if [[ -n "${mtp_pid}" ]] && ! kill -0 "${mtp_pid}" 2>/dev/null; then
     probe_ok=0
     break
   fi
-  # Once the HTTP server is listening, the model loaded successfully.
+  # Once the HTTP server is listening, startup succeeded.
   if curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
     probe_ok=1
     break
@@ -124,12 +124,9 @@ for _ in $(seq 1 "${MTP_PROBE_SECONDS}"); do
 done
 
 if [[ "${probe_ok}" == "1" ]]; then
-  # MTP worked. Hand the process to the foreground so it becomes PID 1's child
-  # and we stream its logs. `wait` blocks until it exits; its exit code
-  # becomes our exit code.
-  echo "MTP speculative decoding active. Tailing server logs..."
-  tail -f "${LOG}" --pid="${pid}" 2>/dev/null &
-  wait "${pid}"
+  echo "MTP speculative decoding active. Server is listening on ${HOST}:${PORT}."
+  # Hand the foreground to the running process; wait until it exits.
+  wait "${mtp_pid}" 2>/dev/null
   exit $?
 fi
 
@@ -139,8 +136,10 @@ echo "MTP startup did not succeed within ${MTP_PROBE_SECONDS}s. Last log lines:"
 tail -n 40 "${LOG}" >&2 || true
 echo "--------------------------------------------------------------------"
 echo "Restarting WITHOUT speculative decoding (plain decode)..."
-kill "${pid}" 2>/dev/null || true
-wait "${pid}" 2>/dev/null || true
-sleep 1
+[[ -n "${mtp_pid}" ]] && kill "${mtp_pid}" 2>/dev/null || true
+kill "${pipe_pid}" 2>/dev/null || true
+wait 2>/dev/null || true
+sleep 2
 
-run_server "${base_args[@]}"
+# exec replaces the shell with llama-server as PID 1
+exec "${base_args[@]}"
