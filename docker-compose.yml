@@ -11,6 +11,7 @@ services:
   llama-ui:
     image: docker.io/binarybrian/llama-ui:4060ti-mtp-iq2m
     container_name: llama-ui
+    pull_policy: always
     ports:
       - "30084:8080"
     volumes:
