@@ -43,12 +43,12 @@ base_args=(
   -m "${MODEL_PATH}"
   --alias "${ALIAS}"
   --host "${HOST}" --port "${PORT}"
-  -ngl all
+  -ngl "${NGL:-all}"
   -fa on
   --ctx-size "${CTX_SIZE:-32768}"
   --kv-unified
-  --cache-type-k q8_0
-  --cache-type-v q5_0
+  --cache-type-k "${CACHE_TYPE_K:-q8_0}"
+  --cache-type-v "${CACHE_TYPE_V:-q5_0}"
   --parallel 1
   --jinja
   --reasoning-format auto
@@ -65,7 +65,7 @@ base_args=(
   --min-p 0.00
   --repeat-penalty 1.0
   --presence-penalty 0.0
-  --tools all
+  --tools "${TOOLS:-all}"
 )
 
 if [[ -n "${MMPROJ_PATH}" ]]; then
