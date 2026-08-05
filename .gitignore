@@ -1,0 +1,22 @@
+# Binaries / build artifacts (never bake model weights into the image)
+*.gguf
+*.bin
+*.onnx
+*.pt
+*.safetensors
+
+# Local data / caches
+data/
+.cache/
+tmp/
+*.log
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Docs that are working notes, not the deliverable
+0804-llama_cpp-vs-llvm.md

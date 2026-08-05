@@ -1,0 +1,16 @@
+# Build context — keep the image small
+.git
+.gitignore
+*.md
+Dockerfile
+docker-compose.yml
+0804-llama_cpp-vs-llvm.md
+
+# Never include model weights or datasets
+*.gguf
+*.bin
+*.onnx
+*.pt
+*.safetensors
+/models/
+/data/

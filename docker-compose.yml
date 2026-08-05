@@ -1,0 +1,32 @@
+# TrueNAS Custom App — llama.cpp server + embedded Web UI
+#
+# Install via: TrueNAS SCALE (Electric Eel) → Apps → Custom Apps →
+#             "Install via YAML" → paste this content.
+#
+# Host: 192.168.2.1   Port: 8080 (WebUI + OpenAI-compatible API)
+#
+# Image is published to GHCR; TrueNAS pulls it on install. The model files are
+# bind-mounted read-only from the vega pool — keep them on SSD for fast load.
+services:
+  llama-ui:
+    image: ghcr.io/binarybrian/llama-ui:4060ti-mtp-iq2m
+    container_name: llama-ui
+    ports:
+      - "8080:8080"
+    volumes:
+      # /mnt/vega/models on TrueNAS -> /models inside the container (read-only)
+      - /mnt/vega/models:/models:ro
+    environment:
+      # MTP-enabled IQ2_M Qwen3.6-27B (fits 16GB VRAM with room for KV + draft)
+      - MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ2_M.gguf
+      - MMPROJ_PATH=/models/qwen36-dau/mmproj-BF16.gguf
+      - ALIAS=qwable-dau
+      - TRY_MTP=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
