@@ -37,36 +37,78 @@ fi
 
 # -----------------------------------------------------------------------------
 # Build the argument list. argv[0] is the binary name; the rest are flags.
+#
+# Context/GPU-layer fitting:
+#   - If CTX_SIZE is set (non-empty): explicit --ctx-size + -ngl all.
+#     No --fit (it aborts when -ngl is pinned by the user).
+#   - If CTX_SIZE is empty: switch to full --fit on + drop -ngl all so fit
+#     can auto-tune BOTH GPU layers and context to available VRAM.
+#     Use CTX_SIZE= (empty) for hands-off "let llama-cpp decide" mode.
 # -----------------------------------------------------------------------------
-base_args=(
-  llama-server
-  -m "${MODEL_PATH}"
-  --alias "${ALIAS}"
-  --host "${HOST}" --port "${PORT}"
-  -ngl "${NGL:-all}"
-  -fa on
-  --ctx-size "${CTX_SIZE:-32768}"
-  --kv-unified
-  --cache-type-k "${CACHE_TYPE_K:-q8_0}"
-  --cache-type-v "${CACHE_TYPE_V:-q5_0}"
-  --parallel 1
-  --jinja
-  --reasoning-format auto
-  --reasoning auto
-  --reasoning-preserve
-  --chat-template-kwargs '{"preserve_thinking":true}'
-  --metrics
-  --perf
-  --log-timestamps
-  --log-prefix
-  --temp 0.6
-  --top-p 0.95
-  --top-k 20
-  --min-p 0.00
-  --repeat-penalty 1.0
-  --presence-penalty 0.0
-  --tools "${TOOLS:-all}"
-)
+CTX_SIZE="${CTX_SIZE:-32768}"
+if [[ -z "${CTX_SIZE}" ]]; then
+  # Auto-fit mode: let --fit determine ngl + ctx to match free VRAM
+  base_args=(
+    llama-server
+    -m "${MODEL_PATH}"
+    --alias "${ALIAS}"
+    --host "${HOST}" --port "${PORT}"
+    -fa on
+    --fit on
+    --fit-target "${FIT_TARGET:-256}"
+    --kv-unified
+    --cache-type-k "${CACHE_TYPE_K:-q8_0}"
+    --cache-type-v "${CACHE_TYPE_V:-q5_0}"
+    --parallel 1
+    --jinja
+    --reasoning-format auto
+    --reasoning auto
+    --reasoning-preserve
+    --chat-template-kwargs '{"preserve_thinking":true}'
+    --metrics
+    --perf
+    --log-timestamps
+    --log-prefix
+    --temp 0.6
+    --top-p 0.95
+    --top-k 20
+    --min-p 0.00
+    --repeat-penalty 1.0
+    --presence-penalty 0.0
+    --tools "${TOOLS:-all}"
+  )
+else
+  # Explicit ctx mode: pin context + ngl, no --fit
+  base_args=(
+    llama-server
+    -m "${MODEL_PATH}"
+    --alias "${ALIAS}"
+    --host "${HOST}" --port "${PORT}"
+    -ngl "${NGL:-all}"
+    -fa on
+    --ctx-size "${CTX_SIZE}"
+    --kv-unified
+    --cache-type-k "${CACHE_TYPE_K:-q8_0}"
+    --cache-type-v "${CACHE_TYPE_V:-q5_0}"
+    --parallel 1
+    --jinja
+    --reasoning-format auto
+    --reasoning auto
+    --reasoning-preserve
+    --chat-template-kwargs '{"preserve_thinking":true}'
+    --metrics
+    --perf
+    --log-timestamps
+    --log-prefix
+    --temp 0.6
+    --top-p 0.95
+    --top-k 20
+    --min-p 0.00
+    --repeat-penalty 1.0
+    --presence-penalty 0.0
+    --tools "${TOOLS:-all}"
+  )
+fi
 
 if [[ -n "${MMPROJ_PATH}" ]]; then
   base_args+=( --mmproj "${MMPROJ_PATH}" --image-min-tokens 1024 )
