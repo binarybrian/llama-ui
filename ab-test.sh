@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # A/B quality comparison: local 5090 (Q6_K) vs TrueNAS 4060 Ti (IQ2_M)
 # Sends identical prompts to both endpoints and saves results side-by-side.
-set -euo pipefail
+set -uo pipefail
 
 LOCAL="http://localhost:8484/v1/chat/completions"
 REMOTE="http://192.168.2.1:30084/v1/chat/completions"
 OUT="/tmp/llama-ab-test-$(date +%Y%m%d-%H%M%S).md"
+TMPFILE="/tmp/ab-response-$$.json"
 
 cat <<EOF > "$OUT"
 # llama.cpp A/B Quality Comparison
@@ -13,7 +14,7 @@ cat <<EOF > "$OUT"
 **Date**: $(date)
 **Local (5090, Q6_K)**: $LOCAL
 **Remote (4060 Ti, IQ2_M)**: $REMOTE
-**Temperature**: 0.3, **Max tokens**: 1000
+**Temperature**: 0.3, **Max tokens**: 2000
 
 EOF
 
@@ -24,16 +25,50 @@ send_prompt() {
   local endpoint_url="$4"
 
   echo "  → $endpoint_name" >&2
-  local response
-  response=$(curl -s "$endpoint_url" --max-time 180 \
+
+  local http_code
+  http_code=$(curl -sS \
+    --retry 3 \
+    --retry-delay 5 \
+    --retry-connrefused \
+    --connect-timeout 10 \
+    --max-time 600 \
+    --tcp-keepalive \
+    --tcp-keepalive-cnt 3 \
+    --tcp-keepalive-idle 30 \
+    --tcp-keepalive-intvl 10 \
+    -o "$TMPFILE" \
+    -w "%{http_code}" \
     -H "Content-Type: application/json" \
     -d "{
       \"model\": \"qwable-dau\",
       \"messages\": [{\"role\": \"user\", \"content\": $(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$prompt")}],
-      \"max_tokens\": 1000,
+      \"max_tokens\": 2000,
       \"temperature\": 0.3,
       \"stream\": false
-    }" | python3 -c "
+    }" \
+    "$endpoint_url" 2>/tmp/ab-curl-stderr-$$.log)
+
+  local curl_exit=$?
+
+  if [[ "$http_code" != "200" ]] || [[ $curl_exit -ne 0 ]]; then
+    local err_msg
+    err_msg=$(cat /tmp/ab-curl-stderr-$$.log 2>/dev/null || echo "(no stderr)")
+    echo "" >> "$OUT"
+    echo "### $endpoint_name" >> "$OUT"
+    echo "" >> "$OUT"
+    echo '```' >> "$OUT"
+    echo "ERROR: HTTP $http_code (curl exit $curl_exit) after 3 retries" >> "$OUT"
+    echo "stderr: $err_msg" >> "$OUT"
+    echo "response: $(head -c 500 "$TMPFILE" 2>/dev/null || echo '(empty)')" >> "$OUT"
+    echo '```' >> "$OUT"
+    echo "" >> "$OUT"
+    rm -f "$TMPFILE" /tmp/ab-curl-stderr-$$.log
+    return
+  fi
+
+  local response
+  response=$(python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -64,7 +99,9 @@ try:
             pass
 except Exception as e:
     print(f'ERROR parsing response: {e}')
-" 2>&1)
+" < "$TMPFILE" 2>&1)
+
+  rm -f "$TMPFILE" /tmp/ab-curl-stderr-$$.log
 
   echo "" >> "$OUT"
   echo "### $endpoint_name" >> "$OUT"
