@@ -78,9 +78,8 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     --host "${HOST}" --port "${PORT}"
     -fa on
     --fit on
-    --fit-target "${FIT_TARGET:-384}"
+    --fit-target "${FIT_TARGET:-256}"
     --fit-ctx 8192
-    --no-warmup
     --kv-unified
     --cache-type-k "${CTK}"
     --cache-type-v "${CTV}"
@@ -111,7 +110,6 @@ else
     -ngl "${NGL:-all}"
     -fa on
     --ctx-size "${CTX_SIZE}"
-    --no-warmup
     --kv-unified
     --cache-type-k "${CTK}"
     --cache-type-v "${CTV}"
