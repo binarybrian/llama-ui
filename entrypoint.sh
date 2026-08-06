@@ -79,7 +79,6 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     -fa on
     --fit on
     --fit-target "${FIT_TARGET:-256}"
-    --fit-ctx 8192
     --kv-unified
     --cache-type-k "${CTK}"
     --cache-type-v "${CTV}"

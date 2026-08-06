@@ -1,4 +1,4 @@
-# llama-ui
+# llama-cpp
 
 llama.cpp server with an embedded Web UI, packaged as a Docker Custom App for
 TrueNAS SCALE (Electric Eel). Built for an **NVIDIA RTX 4060 Ti (16 GB, Ada —
@@ -19,31 +19,52 @@ interface on port 8080.
 
 ## Served model
 
-`Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ2_M.gguf`
-(IQ2_M, ~11.3 GB) with the matching `mmproj-BF16.gguf` for vision. MTP
-speculative decoding is attempted first; the entrypoint falls back to plain
-decode if the model's MTP layers fail to initialize.
+The image is model-agnostic — any GGUF model can be served by setting
+`MODEL_PATH` (and optionally `MMPROJ_PATH` for vision). The default config
+serves `Qwen3.6-27B-Fable-Fus-711-...IQ2_M.gguf` (~11.3 GB), which fits
+comfortably in 16 GB VRAM with auto-fit context allocation. Swap models by
+changing the env vars — no rebuild needed.
+
+For NVIDIA RTX 40-series (Ada Lovelace), use `mmproj-F16.gguf` (not BF16) —
+Ada has native F16 tensor cores but lacks native BF16 support.
 
 ## Quick start (TrueNAS)
 
 1. Apps → Custom Apps → **Install via YAML** → paste `docker-compose.yml`.
 2. Point the `volumes` entry at your models dataset (SSD recommended).
-3. Install. The Web UI comes up at `http://<nas-ip>:8080`.
+3. Install. The Web UI comes up at `http://<nas-ip>:30084`.
 
 ## Build locally
 
 ```sh
 docker buildx build \
   --platform linux/amd64 \
-  -t docker.io/binarybrian/llama-ui:4060ti-mtp-iq2m \
-  --push .
+  -t docker.io/binarybrian/llama-cpp:4060ti \
+  .
 ```
 
 Override the CUDA arch or llama.cpp tag via build args if needed:
 
 ```sh
 docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
-  --build-arg LLAMA_TAG=b10235 -t llama-ui:local .
+  --build-arg LLAMA_TAG=b10235 -t llama-cpp:local .
+```
+
+## Publishing
+
+```sh
+# Build and push in one step
+docker buildx build \
+  --platform linux/amd64 \
+  -t docker.io/binarybrian/llama-cpp:4060ti \
+  --push .
+
+# Or build locally first, then push separately
+docker buildx build -t docker.io/binarybrian/llama-cpp:4060ti .
+docker push docker.io/binarybrian/llama-cpp:4060ti
+
+# TrueNAS picks up the new image on app restart (pull_policy: always)
+# — no delete/reinstall needed, just click "Restart"
 ```
 
 ## Environment variables
@@ -51,7 +72,7 @@ docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
 | Var | Default | Purpose |
 |---|---|---|
 | `MODEL_PATH` | `/models/qwen36-dau/...IQ2_M.gguf` | GGUF weights |
-| `MMPROJ_PATH` | `/models/qwen36-dau/mmproj-BF16.gguf` | Vision projector (empty disables vision) |
+| `MMPROJ_PATH` | `/models/qwen36-dau/mmproj-F16.gguf` | Vision projector (empty disables vision) |
 | `ALIAS` | `qwable-dau` | Model alias shown in the UI |
 | `TRY_MTP` | `1` | Try MTP speculative decoding, fall back if unsupported |
 | `MTP_PROBE_SECONDS` | `600` | Startup probe window before fallback |

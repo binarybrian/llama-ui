@@ -9,7 +9,7 @@
 # bind-mounted read-only from the vega pool — keep them on SSD for fast load.
 services:
   llama-ui:
-    image: docker.io/binarybrian/llama-cpp:4060ti
+    image: docker.io/binarybrian/llama-ui:4060ti-mtp-iq2m
     container_name: llama-ui
     pull_policy: always
     ports:
@@ -19,15 +19,15 @@ services:
       - /mnt/vega/models:/models:ro
     environment:
       # Qwen3.6-27B IQ2_M (fits 16GB VRAM with auto-fit context)
-      - MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-IQ2_M.gguf
-      - MMPROJ_PATH=
+      - MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ2_M.gguf
+      - MMPROJ_PATH=/models/qwen36-dau/mmproj-BF16.gguf
       - ALIAS=qwable-dau
-      - TRY_MTP=0
+      - TRY_MTP=1
       - CTX_SIZE=auto
-      - CTK=auto
-      - CTV=auto
-      - CTKD=auto
-      - CTVD=auto
+      - CTK=q5_0
+      - CTV=q4_0
+      - CTKD=q4_0
+      - CTVD=q4+0
       - AGENT=1
       - CORS_ORIGINS=*
     deploy:
