@@ -63,7 +63,9 @@ docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
 | `CTV` | `auto` (→ q8_0) | KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
 | `CTKD` | `auto` (→ q8_0) | MTP draft KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
 | `CTVD` | `auto` (→ q8_0) | MTP draft KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
-| `TOOLS` | `all` | Built-in tools to enable (empty to disable) |
+| `TOOLS` | `all` | Built-in tools to enable (empty to disable; redundant when AGENT=1) |
+| `AGENT` | `1` | Enable CORS proxy + all built-in tools (`--agent`). Trusted LANs only. |
+| `CORS_ORIGINS` | `*` | CORS origins (`*` for all, or comma-separated URLs). Needed when AGENT=1 for LAN access. |
 
 ## Tuning for low VRAM (16 GB 4060 Ti)
 

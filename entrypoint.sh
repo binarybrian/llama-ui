@@ -18,6 +18,13 @@ ALIAS="${ALIAS:-qwable-dau}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 
+# AGENT: enable CORS proxy + all built-in tools (--agent flag).
+# For trusted LANs only — enables exec_shell_command, file read/write, etc.
+# When --agent is on, llama.cpp defaults --cors-origins to localhost; set
+# CORS_ORIGINS to allow LAN callers.
+AGENT="${AGENT:-1}"
+CORS_ORIGINS="${CORS_ORIGINS-}"
+
 # Probe window: how long to wait before deciding MTP startup failed.
 # The 11GB IQ2_M model loading off NFS can take several minutes on a cold
 # read; 600s is a safe upper bound. On TrueNAS with local SSD it'll be ~15s.
@@ -127,8 +134,20 @@ else
   )
 fi
 
+# Add --agent if AGENT is enabled (CORS proxy + all built-in tools).
+if [[ "${AGENT}" == "1" || "${AGENT}" == "on" ]]; then
+  base_args+=( --agent )
+fi
+
+# Add --cors-origins if CORS_ORIGINS is set (needed when --agent restricts
+# CORS to localhost by default; set to '*' or a comma-separated list of URLs).
+if [[ -n "${CORS_ORIGINS}" ]]; then
+  base_args+=( --cors-origins "${CORS_ORIGINS}" )
+fi
+
 # Add --tools only if TOOLS is non-empty (empty = disable tools).
 # Use ${TOOLS-all} (not :-) so TOOLS= (empty) does NOT default to "all".
+# Note: --agent already enables all tools; this is for when AGENT is off.
 TOOLS_VAL="${TOOLS-all}"
 if [[ -n "${TOOLS_VAL}" ]]; then
   base_args+=( --tools "${TOOLS_VAL}" )
