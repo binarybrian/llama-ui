@@ -71,7 +71,9 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     --host "${HOST}" --port "${PORT}"
     -fa on
     --fit on
-    --fit-target "${FIT_TARGET:-256}"
+    --fit-target "${FIT_TARGET:-384}"
+    --fit-ctx 8192
+    --no-warmup
     --kv-unified
     --cache-type-k "${CTK}"
     --cache-type-v "${CTV}"
@@ -102,6 +104,7 @@ else
     -ngl "${NGL:-all}"
     -fa on
     --ctx-size "${CTX_SIZE}"
+    --no-warmup
     --kv-unified
     --cache-type-k "${CTK}"
     --cache-type-v "${CTV}"
@@ -178,8 +181,9 @@ LOG=/tmp/llama-mtp-start.log
 # tee to both the log file and stdout so docker logs shows progress
 ( "${base_args[@]}" "${mtp_args[@]}" ) 2>&1 | tee "${LOG}" &
 pipe_pid=$!
-# The actual llama-server PID is the tee'd process's child; find it.
-mtp_pid=$(pgrep -P "${pipe_pid}" -f llama-server | head -1 || echo "")
+# Find the llama-server process by command line (pgrep -P on pipe_pid finds
+# tee's direct children, but llama-server is a grandchild — pgrep -P misses it).
+mtp_pid=$(pgrep -f "llama-server.*--port ${PORT}" | head -1 || echo "")
 
 probe_ok=0
 for _ in $(seq 1 "${MTP_PROBE_SECONDS}"); do
@@ -218,6 +222,8 @@ fi
 echo "MTP speculative decoding active. Server is listening on ${HOST}:${PORT}."
 wait "${mtp_pid}" 2>/dev/null
 exit_code=$?
+# Let tee flush any remaining output before dumping the crash log
+wait "${pipe_pid}" 2>/dev/null
 
 if [[ ${exit_code} -ne 0 ]]; then
   echo "--------------------------------------------------------------------"
