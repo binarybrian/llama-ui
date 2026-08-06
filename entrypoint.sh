@@ -39,14 +39,13 @@ fi
 # Build the argument list. argv[0] is the binary name; the rest are flags.
 #
 # Context/GPU-layer fitting:
-#   - If CTX_SIZE is set (non-empty): explicit --ctx-size + -ngl all.
+#   - If CTX_SIZE is "auto" (or empty): --fit on + no -ngl so llama-cpp
+#     auto-tunes BOTH GPU layers and context to available VRAM.
+#   - If CTX_SIZE is a number (default 32768): -ngl all + explicit --ctx-size.
 #     No --fit (it aborts when -ngl is pinned by the user).
-#   - If CTX_SIZE is empty: switch to full --fit on + drop -ngl all so fit
-#     can auto-tune BOTH GPU layers and context to available VRAM.
-#     Use CTX_SIZE= (empty) for hands-off "let llama-cpp decide" mode.
 # -----------------------------------------------------------------------------
 CTX_SIZE="${CTX_SIZE:-32768}"
-if [[ -z "${CTX_SIZE}" ]]; then
+if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
   # Auto-fit mode: let --fit determine ngl + ctx to match free VRAM
   base_args=(
     llama-server
