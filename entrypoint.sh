@@ -13,7 +13,7 @@ set -uo pipefail
 # Configuration (env-overridable so the same image works for other models)
 # -----------------------------------------------------------------------------
 MODEL_PATH="${MODEL_PATH:-/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ2_M.gguf}"
-MMPROJ_PATH="${MMPROJ_PATH:-/models/qwen36-dau/mmproj-BF16.gguf}"
+MMPROJ_PATH="${MMPROJ_PATH-/models/qwen36-dau/mmproj-BF16.gguf}"
 ALIAS="${ALIAS:-qwable-dau}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
@@ -91,7 +91,6 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     --min-p 0.00
     --repeat-penalty 1.0
     --presence-penalty 0.0
-    --tools "${TOOLS:-all}"
   )
 else
   # Explicit ctx mode: pin context + ngl, no --fit
@@ -122,8 +121,14 @@ else
     --min-p 0.00
     --repeat-penalty 1.0
     --presence-penalty 0.0
-    --tools "${TOOLS:-all}"
   )
+fi
+
+# Add --tools only if TOOLS is non-empty (empty = disable tools).
+# Use ${TOOLS-all} (not :-) so TOOLS= (empty) does NOT default to "all".
+TOOLS_VAL="${TOOLS-all}"
+if [[ -n "${TOOLS_VAL}" ]]; then
+  base_args+=( --tools "${TOOLS_VAL}" )
 fi
 
 if [[ -n "${MMPROJ_PATH}" ]]; then
