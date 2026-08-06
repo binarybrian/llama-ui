@@ -33,10 +33,8 @@ send_prompt() {
     --retry-connrefused \
     --connect-timeout 10 \
     --max-time 600 \
-    --tcp-keepalive \
-    --tcp-keepalive-cnt 3 \
-    --tcp-keepalive-idle 30 \
-    --tcp-keepalive-intvl 10 \
+    --keepalive-time 30 \
+    --keepalive-cnt 3 \
     -o "$TMPFILE" \
     -w "%{http_code}" \
     -H "Content-Type: application/json" \
