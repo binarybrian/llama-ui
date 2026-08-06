@@ -36,6 +36,16 @@ if [[ -n "${MMPROJ_PATH}" ]] && [[ ! -f "${MMPROJ_PATH}" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# Resolve CTK/CTV sentinels: "auto" → q8_0 for both (good VRAM/quality balance
+# on 16GB cards; llama.cpp has no native "auto" for cache types).
+# Valid values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+# -----------------------------------------------------------------------------
+CTK="${CTK:-auto}"
+CTV="${CTV:-auto}"
+[[ "$CTK" == "auto" ]] && CTK="q8_0"
+[[ "$CTV" == "auto" ]] && CTV="q8_0"
+
+# -----------------------------------------------------------------------------
 # Build the argument list. argv[0] is the binary name; the rest are flags.
 #
 # Context/GPU-layer fitting:
@@ -56,8 +66,8 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     --fit on
     --fit-target "${FIT_TARGET:-256}"
     --kv-unified
-    --cache-type-k "${CACHE_TYPE_K:-q8_0}"
-    --cache-type-v "${CACHE_TYPE_V:-q5_0}"
+    --cache-type-k "${CTK}"
+    --cache-type-v "${CTV}"
     --parallel 1
     --jinja
     --reasoning-format auto
@@ -87,8 +97,8 @@ else
     -fa on
     --ctx-size "${CTX_SIZE}"
     --kv-unified
-    --cache-type-k "${CACHE_TYPE_K:-q8_0}"
-    --cache-type-v "${CACHE_TYPE_V:-q5_0}"
+    --cache-type-k "${CTK}"
+    --cache-type-v "${CTV}"
     --parallel 1
     --jinja
     --reasoning-format auto

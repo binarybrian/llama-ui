@@ -50,19 +50,18 @@ docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
 
 | Var | Default | Purpose |
 |---|---|---|
-| `MODEL_PATH` | `/models/qwen36-dau/...MTP-IQ2_M.gguf` | GGUF weights |
+| `MODEL_PATH` | `/models/qwen36-dau/...IQ2_M.gguf` | GGUF weights |
 | `MMPROJ_PATH` | `/models/qwen36-dau/mmproj-BF16.gguf` | Vision projector (empty disables vision) |
 | `ALIAS` | `qwable-dau` | Model alias shown in the UI |
 | `TRY_MTP` | `1` | Try MTP speculative decoding, fall back if unsupported |
-| `MTP_PROBE_SECONDS` | `45` | Startup probe window before fallback |
+| `MTP_PROBE_SECONDS` | `600` | Startup probe window before fallback |
 | `PORT` | `8080` | HTTP listen port |
 | `HOST` | `0.0.0.0` | HTTP bind address |
-| `CTX_SIZE` | `32768` | Context window (tokens). Lower to save VRAM. |
-| `NGL` | `all` | GPU layers to offload (`all`, or a number) |
-| `CACHE_TYPE_K` | `q8_0` | KV cache type for K (f32/f16/bf16/q8_0/q5_0/q4_0/iq4_nl) |
-| `CACHE_TYPE_V` | `q5_0` | KV cache type for V (lower V first to save VRAM) |
-| `TOOLS` | `all` | Built-in tools to enable (set empty to disable) |
-| `MMPROJ_PATH` | `…/mmproj-BF16.gguf` | Vision projector (empty string disables vision) |
+| `CTX_SIZE` | `auto` | Context window (`auto` lets `--fit` decide, or a number) |
+| `NGL` | `all` | GPU layers to offload (`all`, `auto`, or a number) |
+| `CTK` | `auto` (→ q8_0) | KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
+| `CTV` | `auto` (→ q8_0) | KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
+| `TOOLS` | `all` | Built-in tools to enable (empty to disable) |
 
 ## Tuning for low VRAM (16 GB 4060 Ti)
 
@@ -73,8 +72,8 @@ no host OOM), reduce VRAM pressure via env vars — no rebuild needed:
 ```yaml
 environment:
   - CTX_SIZE=16384          # halve context (saves ~2 GB KV cache)
-  - CACHE_TYPE_K=q8_0       # already aggressive
-  - CACHE_TYPE_V=q4_0       # drop V cache further (saves ~1 GB)
+  - CTK=q8_0                # already aggressive
+  - CTV=q4_0                # drop V cache further (saves ~1 GB)
   - TRY_MTP=0               # disable MTP draft (saves ~1 GB)
   - MMPROJ_PATH=            # empty: disable vision (saves ~0.9 GB)
   - TOOLS=                  # empty: disable built-in tools (saves RAM)
