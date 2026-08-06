@@ -14,7 +14,7 @@ cat <<EOF > "$OUT"
 **Date**: $(date)
 **Local (5090, Q6_K)**: $LOCAL
 **Remote (4060 Ti, IQ2_M)**: $REMOTE
-**Temperature**: 0.3, **Max tokens**: 2000
+**Temperature**: 0.3, **Max tokens**: unlimited
 
 EOF
 
@@ -41,7 +41,6 @@ send_prompt() {
     -d "{
       \"model\": \"qwable-dau\",
       \"messages\": [{\"role\": \"user\", \"content\": $(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$prompt")}],
-      \"max_tokens\": 2000,
       \"temperature\": 0.3,
       \"stream\": false
     }" \
