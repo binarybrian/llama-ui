@@ -114,6 +114,12 @@ if [[ -n "${MMPROJ_PATH}" ]]; then
   base_args+=( --mmproj "${MMPROJ_PATH}" --image-min-tokens 1024 )
 fi
 
+# Print the full llama-server command line so docker logs shows exactly
+# what flags are being used (useful for debugging VRAM / startup issues).
+echo ">>> llama-server flags:"
+printf '    %q' "${base_args[@]}"
+printf '\n'
+
 mtp_args=(
   --spec-type draft-mtp
   --spec-draft-n-max 4
@@ -130,6 +136,7 @@ TRY_MTP="${TRY_MTP:-1}"
 
 if [[ "${TRY_MTP}" != "1" ]]; then
   echo "TRY_MTP=0; starting without speculative decoding"
+  printf '>>> MTP flags: (none)\n'
   exec "${base_args[@]}"
 fi
 
@@ -139,6 +146,9 @@ fi
 # (so we can dump it on crash — the pipe may not flush the final error lines).
 # -----------------------------------------------------------------------------
 echo "Starting llama-server with MTP speculative decoding (probe ${MTP_PROBE_SECONDS}s)..."
+printf '>>> MTP flags:'
+printf ' %q' "${mtp_args[@]}"
+printf '\n'
 LOG=/tmp/llama-mtp-start.log
 : > "${LOG}"
 
