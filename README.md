@@ -61,12 +61,14 @@ docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
 | `NGL` | `all` | GPU layers to offload (`all`, `auto`, or a number) |
 | `CTK` | `auto` (→ q8_0) | KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
 | `CTV` | `auto` (→ q8_0) | KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
+| `CTKD` | `auto` (→ q8_0) | MTP draft KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
+| `CTVD` | `auto` (→ q8_0) | MTP draft KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
 | `TOOLS` | `all` | Built-in tools to enable (empty to disable) |
 
 ## Tuning for low VRAM (16 GB 4060 Ti)
 
-The 27B IQ2_M (~11.3 GB) + 32K ctx + MTP draft + mmproj vision can exceed
-16 GB during inference. If the container crashes on queries (exit code 1,
+The 27B IQ2_M (~11.3 GB) + MTP draft + mmproj vision can exceed 16 GB
+during inference. If the container crashes on queries (exit code 1,
 no host OOM), reduce VRAM pressure via env vars — no rebuild needed:
 
 ```yaml
@@ -74,10 +76,16 @@ environment:
   - CTX_SIZE=16384          # halve context (saves ~2 GB KV cache)
   - CTK=q8_0                # already aggressive
   - CTV=q4_0                # drop V cache further (saves ~1 GB)
-  - TRY_MTP=0               # disable MTP draft (saves ~1 GB)
+  - CTKD=q4_0               # aggressive draft KV (draft is speculative, quality matters less)
+  - CTVD=q4_0               # aggressive draft KV
+  - TRY_MTP=0               # disable MTP draft entirely (saves ~2-3 GB)
   - MMPROJ_PATH=            # empty: disable vision (saves ~0.9 GB)
   - TOOLS=                  # empty: disable built-in tools (saves RAM)
 ```
+
+MTP draft KV cache defaults to f16 upstream — the `auto` sentinel sets
+it to q8_0, saving ~0.75 GB vs f16. For even more VRAM, set CTKD/CTVD
+to q4_0 (draft quality matters less since rejected drafts are discarded).
 
 Stop ffmpeg or other GPU processes first (`nvidia-smi` to check). Each
 364 MB of foreign VRAM usage is ~3.5K tokens of context you lose.

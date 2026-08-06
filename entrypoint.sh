@@ -45,6 +45,13 @@ CTV="${CTV:-auto}"
 [[ "$CTK" == "auto" ]] && CTK="q8_0"
 [[ "$CTV" == "auto" ]] && CTV="q8_0"
 
+# Same sentinel pattern for the MTP draft KV cache (defaults to f16 upstream,
+# which wastes ~2x VRAM vs q8_0 on the draft context — critical on 16GB cards).
+CTKD="${CTKD:-auto}"
+CTVD="${CTVD:-auto}"
+[[ "$CTKD" == "auto" ]] && CTKD="q8_0"
+[[ "$CTVD" == "auto" ]] && CTVD="q8_0"
+
 # -----------------------------------------------------------------------------
 # Build the argument list. argv[0] is the binary name; the rest are flags.
 #
@@ -136,6 +143,8 @@ mtp_args=(
   --spec-draft-p-split 0.10
   --spec-draft-p-min 0.6
   --spec-draft-ngl auto
+  --spec-draft-type-k "${CTKD}"
+  --spec-draft-type-v "${CTVD}"
 )
 
 # -----------------------------------------------------------------------------

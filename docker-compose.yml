@@ -19,13 +19,16 @@ services:
       - /mnt/vega/models:/models:ro
     environment:
       # Qwen3.6-27B IQ2_M (fits 16GB VRAM with auto-fit context)
-      - MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-IQ2_M.gguf
+      #- MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-IQ2_M.gguf
+      - MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ2_M.gguf
       - MMPROJ_PATH=/models/qwen36-dau/mmproj-BF16.gguf
       - ALIAS=qwable-dau
-      - TRY_MTP=0
+      - TRY_MTP=1
       - CTX_SIZE=auto
       - CTK=auto
       - CTV=auto
+      - CTKD=auto
+      - CTVD=auto
     deploy:
       resources:
         reservations:
