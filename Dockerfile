@@ -61,9 +61,10 @@ COPY --from=ui-builder /src/llama.cpp/tools/ui/dist ./tools/ui/dist
 # (it skips when dist exists AND sources.cmake shows no newer source files).
 RUN touch ./tools/ui/dist/.ui-stamp 2>/dev/null || true
 
-# Build-info injection (mirrors ebuild's LLAMA_BUILD_NUMBER / COMMIT)
-ENV LLAMA_BUILD_NUMBER=10235
-ENV LLAMA_BUILD_COMMIT=b10235
+# Build-info injection (derived from LLAMA_TAG build arg)
+ARG LLAMA_TAG=b10235
+ENV LLAMA_BUILD_NUMBER=${LLAMA_TAG#b}
+ENV LLAMA_BUILD_COMMIT=${LLAMA_TAG}
 
 # cmake configure — flag set mirrors the Gentoo ebuild src_configure():
 #   - CUDA backend pinned to sm_89 (Ada / RTX 4060 Ti) via build arg
@@ -85,8 +86,8 @@ RUN cmake -S . -B build \
         -DLLAMA_BUILD_UI=ON \
         -DLLAMA_USE_PREBUILT_UI=OFF \
         -DLLAMA_OPENSSL=ON \
-        -DLLAMA_BUILD_NUMBER=10235 \
-        -DLLAMA_BUILD_COMMIT=b10235 \
+        -DLLAMA_BUILD_NUMBER=${LLAMA_TAG#b} \
+        -DLLAMA_BUILD_COMMIT=${LLAMA_TAG} \
         -DGGML_NATIVE=OFF \
         -DGGML_RPC=ON \
         -DGGML_OPENMP=ON \
