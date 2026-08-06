@@ -19,4 +19,7 @@ tmp/
 .idea/
 
 # Docs that are working notes, not the deliverable
-0804-llama_cpp-vs-llvm.md*-log.txt
+0804-llama_cpp-vs-llvm.md
+
+# Log files
+*-log.txt
