@@ -11,7 +11,7 @@ The build host's CUDA toolkit (13.3) is newer than the TrueNAS NVIDIA driver
 runtime on the 4060 Ti. This image builds llama.cpp inside a CUDA 12.8 devel
 container, pinning `CMAKE_CUDA_ARCHITECTURES=89-real` and the Zen 2-safe
 `-DGGML_*` CPU flags. The cmake flag set mirrors the Gentoo ebuild
-`sci-misc/llama-cpp-0_pre10235.ebuild` (commit `b10235`).
+`sci-misc/llama-cpp-0_pre10636.ebuild` (commit `b10636`).
 
 The Web UI is built from source (vite + SvelteKit) and embedded into the
 `llama-server` binary, so a single process serves both the API and the chat
@@ -47,7 +47,7 @@ Override the CUDA arch or llama.cpp tag via build args if needed:
 
 ```sh
 docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
-  --build-arg LLAMA_TAG=b10235 -t llama-cpp:local .
+  --build-arg LLAMA_TAG=b10636 -t llama-cpp:local .
 ```
 
 ## Publishing
