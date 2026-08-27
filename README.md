@@ -88,6 +88,7 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `TOOLS` | `all` | Built-in tools to enable (empty to disable; redundant when AGENT=1) |
 | `AGENT` | `1` | Enable CORS proxy + all built-in tools (`--agent`). Trusted LANs only. |
 | `CORS_ORIGINS` | `*` | CORS origins (`*` for all, or comma-separated URLs). Needed when AGENT=1 for LAN access. |
+| `TEMP` | `0.6` | Sampling temperature (0.0 = deterministic, 1.0 = random) |
 
 ## Tuning for low VRAM (16 GB 4060 Ti)
 

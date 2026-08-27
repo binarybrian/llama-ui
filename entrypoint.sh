@@ -25,6 +25,9 @@ HOST="${HOST:-0.0.0.0}"
 AGENT="${AGENT:-1}"
 CORS_ORIGINS="${CORS_ORIGINS-}"
 
+# Temperature: sampling randomness (0.0 = deterministic, 1.0 = random)
+TEMP="${TEMP:-0.6}"
+
 # Probe window: how long to wait before deciding MTP startup failed.
 # The 11GB IQ2_M model loading off NFS can take several minutes on a cold
 # read; 600s is a safe upper bound. On TrueNAS with local SSD it'll be ~15s.
@@ -92,7 +95,7 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     --perf
     --log-timestamps
     --log-prefix
-    --temp 0.6
+    --temp "${TEMP}"
     --top-p 0.95
     --top-k 20
     --min-p 0.00
@@ -122,7 +125,7 @@ else
     --perf
     --log-timestamps
     --log-prefix
-    --temp 0.6
+    --temp "${TEMP}"
     --top-p 0.95
     --top-k 20
     --min-p 0.00
