@@ -95,6 +95,7 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `ALIAS` | `qwable-dau` | Model alias shown in the UI |
 | `TRY_MTP` | `1` | Try MTP speculative decoding, fall back if unsupported |
 | `MTP_PROBE_SECONDS` | `600` | Startup probe window before fallback |
+| `SPEC_DRAFT_N_MAX` | `2` | Max speculative (draft) tokens per MTP step; lower for less per-step VRAM/latency (4 was the original tuned value) |
 | `PORT` | `8080` | HTTP listen port |
 | `HOST` | `0.0.0.0` | HTTP bind address |
 | `CTX_SIZE` | `auto` | Context window (`auto` lets `--fit` decide, or a number) |

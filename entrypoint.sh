@@ -182,9 +182,13 @@ echo ">>> llama-server flags:"
 printf '    %q' "${base_args[@]}"
 printf '\n'
 
+# Max speculative (draft) tokens per step. Lower to reduce per-step VRAM
+# pressure and latency variance on 16GB cards; 2 is the default, 4 was the
+# original tuned value.
+SPEC_DRAFT_N_MAX="${SPEC_DRAFT_N_MAX:-2}"
 mtp_args=(
   --spec-type draft-mtp
-  --spec-draft-n-max 4
+  --spec-draft-n-max "${SPEC_DRAFT_N_MAX}"
   --spec-draft-n-min 0
   --spec-draft-p-split 0.10
   --spec-draft-p-min 0.6
