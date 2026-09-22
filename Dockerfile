@@ -5,13 +5,16 @@
 # Built against CUDA 12.8 toolkit to match TrueNAS driver 570.172.08.
 # CPU flags target AMD Ryzen 9 3900X (Zen 2): AVX2/BMI2/F16C/FMA3/SSE4.2 only.
 # cmake flag set mirrors the Gentoo ebuild sci-misc/llama-cpp-0_pre10636.ebuild.
+# Optional KV-stream (adaptive KV ring buffer) variant: build arg KV_STREAM=1
+# applies patches/$KV_STREAM_PATCH (per-base: adaptive-kv-stream-b11115.patch
+# for b11115, adaptive-kv-stream-b10729.patch for b10729; picked by build.sh).
 # =============================================================================
 
 # ---------- Stage 1: UI build (Node) ------------------------------------------
 FROM node:22-bookworm-slim AS ui-builder
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-ARG LLAMA_TAG=b10636
+ARG LLAMA_TAG=b10729
 RUN git clone --depth 1 --branch "${LLAMA_TAG}" https://github.com/ggml-org/llama.cpp.git /src/llama.cpp
 WORKDIR /src/llama.cpp/tools/ui
 # Populates build.json (the UI's build-version display). CMake's own npm
@@ -36,8 +39,11 @@ RUN test -f dist/index.html && test -f dist/build.json && test -d dist/_app \
 
 # ---------- Stage 2: llama.cpp build (CUDA 12.8 devel) ------------------------
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS builder
-ARG LLAMA_TAG=b10636
+ARG LLAMA_TAG=b10729
 ARG CMAKE_CUDA_ARCHITECTURES=89-real;89
+ARG KV_STREAM=0
+ARG KV_STREAM_PATCH=adaptive-kv-stream-b11115.patch
+ARG LLAMA_BUILD_SUFFIX=""
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -52,19 +58,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so \
            /usr/local/cuda/lib64/stubs/libcuda.so.1
 
-# Fetch the exact upstream tag (matches ebuild 0_pre10636 -> b10636)
+# Fetch the exact upstream tag
 RUN git clone --depth 1 --branch "${LLAMA_TAG}" \
         https://github.com/ggml-org/llama.cpp.git /src/llama.cpp
 WORKDIR /src/llama.cpp
+
+# Optional adaptive KV streaming (ring buffer) patch. Each patch file is
+# generated against a specific upstream tag (see patches/); --check fails the
+# build loudly if KV_STREAM_PATCH does not match the fetched LLAMA_TAG.
+COPY patches/${KV_STREAM_PATCH} /tmp/kvstream.patch
+RUN if [ "$KV_STREAM" = "1" ]; then \
+        git apply --check /tmp/kvstream.patch && git apply /tmp/kvstream.patch; \
+    fi
 
 # Bring in the prebuilt UI assets from stage 1 so CMake's ui-assets.cmake
 # picks them up from SRC_DIST_DIR (priority 1) and skips both npm rebuild and
 # the Hugging Face download fallback.
 COPY --from=ui-builder /src/llama.cpp/tools/ui/dist ./tools/ui/dist
 
-# Build-info injection (derived from LLAMA_TAG build arg)
+# Build-info injection (derived from LLAMA_TAG build arg; +kvstream suffix
+# identifies the patched variant in the UI and /metrics)
 ENV LLAMA_BUILD_NUMBER=${LLAMA_TAG#b}
-ENV LLAMA_BUILD_COMMIT=${LLAMA_TAG}
+ENV LLAMA_BUILD_COMMIT=${LLAMA_TAG}${LLAMA_BUILD_SUFFIX}
 
 # cmake configure — flag set mirrors the Gentoo ebuild src_configure():
 #   - CUDA backend pinned to sm_89 (Ada / RTX 4060 Ti) via build arg
@@ -87,7 +102,7 @@ RUN cmake -S . -B build \
         -DLLAMA_USE_PREBUILT_UI=OFF \
         -DLLAMA_OPENSSL=ON \
         -DLLAMA_BUILD_NUMBER=${LLAMA_TAG#b} \
-        -DLLAMA_BUILD_COMMIT=${LLAMA_TAG} \
+        -DLLAMA_BUILD_COMMIT=${LLAMA_TAG}${LLAMA_BUILD_SUFFIX} \
         -DGGML_NATIVE=OFF \
         -DGGML_RPC=ON \
         -DGGML_OPENMP=ON \

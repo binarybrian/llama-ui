@@ -20,7 +20,8 @@ services:
     environment:
       # Qwen3.6-27B IQ2_M (fits 16GB VRAM with auto-fit context)
       - MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-IQ2_M.gguf
-      - MMPROJ_PATH=
+      - MMPROJ_PATH=/models/qwen36-dau/mmproj-F16.gguf
+      - MMPROJ_OFFLOAD=0
       - ALIAS=qwable-dau
       - TRY_MTP=0
       - CTX_SIZE=auto
@@ -30,6 +31,9 @@ services:
       - CTVD=auto
       - AGENT=1
       - CORS_ORIGINS=*
+      # Adaptive KV streaming (ring buffer) staging pool in MiB. Only takes
+      # effect on images built with ./build.sh --kv-stream; 0 = disabled.
+      - KV_STREAM_STAGE_MIB=0
     deploy:
       resources:
         reservations:

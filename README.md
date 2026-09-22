@@ -37,18 +37,36 @@ Ada has native F16 tensor cores but lacks native BF16 support.
 ## Build locally
 
 ```sh
-docker buildx build \
-  --platform linux/amd64 \
-  -t docker.io/binarybrian/llama-cpp:4060ti \
-  .
+./build.sh --local
 ```
+
+`./build.sh` defaults to the latest release **including pre-releases** (the
+rolling `bNNNN` series); pass a tag to pin it (e.g. `./build.sh b10729 --local`).
 
 Override the CUDA arch or llama.cpp tag via build args if needed:
 
 ```sh
 docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
-  --build-arg LLAMA_TAG=b10636 -t llama-cpp:local .
+  --build-arg LLAMA_TAG=b10729 -t llama-cpp:local .
 ```
+
+### Adaptive KV streaming (ring buffer) variant
+
+```sh
+./build.sh --kv-stream --local
+```
+
+Applies the adaptive KV streaming patch (derived from
+[RaymondHuang210129/llama.cpp-adaptive-kv-streaming](https://github.com/RaymondHuang210129/llama.cpp-adaptive-kv-streaming),
+branch `feature/adaptive-kv-stream`) on top of the standard build. The
+patch file is chosen by tag: `b11115` →
+`patches/adaptive-kv-stream-b11115.patch`, `b10729` →
+`patches/adaptive-kv-stream-b10729.patch`; other tags error out in
+`build.sh`, and a mismatched base would fail the `git apply --check` guard
+in the Dockerfile. The binary gains `--kv-stream-stage-mib N` (staging
+pool in MiB, 0 = off), exposed as the `KV_STREAM_STAGE_MIB` env var. If
+that env var is set on a non-`--kv-stream` image, the entrypoint detects
+the missing flag and continues without it instead of failing startup.
 
 ## Publishing
 
@@ -72,7 +90,8 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | Var | Default | Purpose |
 |---|---|---|
 | `MODEL_PATH` | `/models/qwen36-dau/...IQ2_M.gguf` | GGUF weights |
-| `MMPROJ_PATH` | `/models/qwen36-dau/mmproj-F16.gguf` | Vision projector (empty disables vision) |
+| `MMPROJ_PATH` | `/models/qwen36-dau/mmproj-BF16.gguf` | Vision projector (empty disables vision) |
+| `MMPROJ_OFFLOAD` | `auto` | mmproj GPU offload (`auto` = llama.cpp decides, `on` = force GPU, `off` = keep on CPU) |
 | `ALIAS` | `qwable-dau` | Model alias shown in the UI |
 | `TRY_MTP` | `1` | Try MTP speculative decoding, fall back if unsupported |
 | `MTP_PROBE_SECONDS` | `600` | Startup probe window before fallback |
@@ -89,6 +108,7 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `AGENT` | `1` | Enable CORS proxy + all built-in tools (`--agent`). Trusted LANs only. |
 | `CORS_ORIGINS` | `*` | CORS origins (`*` for all, or comma-separated URLs). Needed when AGENT=1 for LAN access. |
 | `TEMP` | `0.6` | Sampling temperature (0.0 = deterministic, 1.0 = random) |
+| `KV_STREAM_STAGE_MIB` | `0` | Adaptive KV streaming (ring buffer) staging pool in MiB. Only effective on `--kv-stream` builds (`0` = disabled); on other builds the entrypoint warns and skips the flag |
 
 ## Tuning for low VRAM (16 GB 4060 Ti)
 
@@ -105,6 +125,7 @@ environment:
   - CTVD=q4_0               # aggressive draft KV
   - TRY_MTP=0               # disable MTP draft entirely (saves ~2-3 GB)
   - MMPROJ_PATH=            # empty: disable vision (saves ~0.9 GB)
+  - MMPROJ_OFFLOAD=0        # keep projector on CPU instead of GPU
   - TOOLS=                  # empty: disable built-in tools (saves RAM)
 ```
 

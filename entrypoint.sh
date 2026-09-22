@@ -14,6 +14,8 @@ set -uo pipefail
 # -----------------------------------------------------------------------------
 MODEL_PATH="${MODEL_PATH:-/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ2_M.gguf}"
 MMPROJ_PATH="${MMPROJ_PATH-/models/qwen36-dau/mmproj-BF16.gguf}"
+# MMPROJ_OFFLOAD: auto = llama.cpp decides, on = force GPU, off = keep on CPU
+MMPROJ_OFFLOAD="${MMPROJ_OFFLOAD:-auto}"
 ALIAS="${ALIAS:-qwable-dau}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
@@ -153,8 +155,25 @@ if [[ -n "${TOOLS_VAL}" ]]; then
   base_args+=( --tools "${TOOLS_VAL}" )
 fi
 
+# Adaptive KV streaming (ring buffer) staging pool in MiB. Only exists in
+# --kv-stream image builds; 0 (default) leaves the flag unset. Probe the
+# binary so a mismatched image (patch not applied) degrades to plain decode
+# instead of dying on an unknown flag.
+KV_STREAM_STAGE_MIB="${KV_STREAM_STAGE_MIB:-0}"
+if [[ "${KV_STREAM_STAGE_MIB}" != "0" && -n "${KV_STREAM_STAGE_MIB}" ]]; then
+  if { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--kv-stream-stage-mib"; then
+    base_args+=( --kv-stream-stage-mib "${KV_STREAM_STAGE_MIB}" )
+  else
+    echo "WARN: KV_STREAM_STAGE_MIB=${KV_STREAM_STAGE_MIB} set, but this llama-server has no --kv-stream-stage-mib (not a --kv-stream build); continuing without it" >&2
+  fi
+fi
+
 if [[ -n "${MMPROJ_PATH}" ]]; then
   base_args+=( --mmproj "${MMPROJ_PATH}" --image-min-tokens 1024 )
+  case "${MMPROJ_OFFLOAD}" in
+    on|1)  base_args+=( --mmproj-offload ) ;;
+    off|0) base_args+=( --no-mmproj-offload ) ;;
+  esac
 fi
 
 # Print the full llama-server command line so docker logs shows exactly
