@@ -197,6 +197,37 @@ throttled). Add under `deploy.resources` if you ever want caps:
 Reference: `memory: 32Gi` is comfortable for the production config above;
 24Gi is tight; 16Gi will not survive 131072 ctx with q8_0/q8_0 KV.
 
+## Benchmarking (mtp-bench.sh)
+
+`mtp-bench.sh` measures prompt/decode speed through `/completion` and is
+the standard tool for A/B-ing server configs (notably MTP on vs off):
+
+```sh
+./mtp-bench.sh [base_url] [n_predict] [runs]
+# defaults: http://localhost:8484  1000  3
+# e.g. against the TrueNAS app:
+./mtp-bench.sh http://192.168.2.1:30084 1000 3
+```
+
+Per measured run it prints: tokens generated, decode and prompt rates
+(tokens/s), draft acceptance (MTP only; `n/a` without speculative
+decoding), stop reason, and context retained by the server's slot cache.
+A median decode rate across runs is printed at the end.
+
+Design notes (why the numbers are clean):
+
+- One unmeasured warmup run absorbs one-time slot-init overhead.
+- `cache_prompt: false` is sent per request — otherwise the server's slot
+  cache (similarity 0.10 default) carries context between runs.
+- Prompts are rotated and uniquely tagged so no two runs share content.
+- Runs that stop early on EOS are flagged; the median smooths them out.
+
+Reference result (Qwen3.8-27B IQ3_S, 4060 Ti, 131072 ctx, code prompt):
+MTP on (n-max 2, ~86% acceptance) ≈ 37 t/s decode vs MTP off ≈ 22 t/s —
+a ~1.7× decode win, offset by a ~1.6× prefill slowdown (the MTP module
+runs on every forward pass). Keep MTP on for decode-dominated interactive
+use.
+
 ## Endpoints
 
 - `GET /` — embedded Web UI
