@@ -143,6 +143,60 @@ to q4_0 (draft quality matters less since rejected drafts are discarded).
 Stop ffmpeg or other GPU processes first (`nvidia-smi` to check). Each
 364 MB of foreign VRAM usage is ~3.5K tokens of context you lose.
 
+## CPU and system RAM
+
+The TrueNAS custom app only reserves the GPU device — there are no CPU or
+memory limits by default, so the container may use all host resources.
+
+**CPU** — the entrypoint passes no `-t/--threads`, so llama.cpp uses its
+default (auto = all host cores; the startup log shows `n_threads = N`).
+With `-ngl all` most math is on the GPU, but prompt processing, sampling,
+and host-side work fan out over every core.
+
+**System RAM** — no internal cap; usage is driven by your configuration.
+Reference values for the production config (Qwen3.8-27B IQ3_S,
+`CTX_SIZE=131072`, `CTK=q8_0 CTV=q8_0`, `KV_STREAM_STAGE_MIB=2048`,
+`MMPROJ_OFFLOAD=0`):
+
+| Consumer | Host RAM |
+| --- | --- |
+| Pinned KV cache (full ctx, q8_0 K/V) | ~17–19 GB — `ctx × layers × kv_heads × head_dim × 2 × ~1.0625 B`; ≈133 KiB/token for a 64-layer / 8-KV-head 27B |
+| mmproj on CPU (`--no-mmproj-offload`) | ~1–2 GB (= the mmproj file size) |
+| Model GGUF via mmap (page cache, reclaimable) | ~11 GB |
+| Server / threadpool / misc | ~1 GB |
+| **Resident total (excl. page cache)** | **~20–23 GB** |
+
+- The KV pool (`KV_STREAM_STAGE_MIB`) lives entirely on the GPU; it adds
+  no host RAM beyond bookkeeping. What *does* scale with ctx on the host
+  is the pinned KV cache — it grows linearly with `CTX_SIZE` and with the
+  K/V cache types (q4_0 V ≈ half of q8_0 V).
+- Exact per-layer KV sizes are printed at startup (`KV buffer size =
+  ... MiB` lines) — use those rather than the estimates above.
+- Pinned KV is not reclaimable, so it is what determines the host-RAM
+  floor for a given context size.
+
+**Optional: limiting resources** — the custom-app YAML accepts standard
+k8s resource limits (memory limit → pod OOM-killed; CPU limit →
+throttled). Add under `deploy.resources` if you ever want caps:
+
+```yaml
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 32Gi
+        reservations:
+          cpus: "2"
+          memory: 16Gi
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+Reference: `memory: 32Gi` is comfortable for the production config above;
+24Gi is tight; 16Gi will not survive 131072 ctx with q8_0/q8_0 KV.
+
 ## Endpoints
 
 - `GET /` — embedded Web UI
