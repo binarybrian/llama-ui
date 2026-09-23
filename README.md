@@ -108,8 +108,14 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `TOOLS` | `all` | Built-in tools to enable (empty to disable; redundant when AGENT=1) |
 | `AGENT` | `1` | Enable CORS proxy + all built-in tools (`--agent`). Trusted LANs only. |
 | `CORS_ORIGINS` | `*` | CORS origins (`*` for all, or comma-separated URLs). Needed when AGENT=1 for LAN access. |
-| `TEMP` | `0.6` | Sampling temperature (0.0 = deterministic, 1.0 = random) |
+| `TEMP` | `1.0` | Sampling temperature (0.0 = deterministic, 1.0 = random) |
+| `TOP_P` | `0.95` | Nucleus sampling probability |
+| `TOP_K` | `20` | Top-k sampling (0 = disabled) |
+| `MIN_P` | `0.0` | Min-p sampling (0.0 = disabled) |
+| `PRESENCE_PENALTY` | `0.0` | Repeat presence penalty |
 | `KV_STREAM_STAGE_MIB` | `0` | Adaptive KV streaming (ring buffer) staging pool in MiB. Only effective on `--kv-stream` builds (`0` = disabled); on other builds the entrypoint warns and skips the flag |
+
+Sampling defaults follow the Qwen3.8-27B recommended thinking-mode settings ([byteshape/Qwen3.8-27B-GGUF](https://huggingface.co/byteshape/Qwen3.8-27B-GGUF)).
 
 ## Tuning for low VRAM (16 GB 4060 Ti)
 

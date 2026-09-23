@@ -27,8 +27,13 @@ HOST="${HOST:-0.0.0.0}"
 AGENT="${AGENT:-1}"
 CORS_ORIGINS="${CORS_ORIGINS-}"
 
-# Temperature: sampling randomness (0.0 = deterministic, 1.0 = random)
-TEMP="${TEMP:-0.6}"
+# Sampling defaults: Qwen3.8-27B recommended thinking-mode settings
+# (https://huggingface.co/byteshape/Qwen3.8-27B-GGUF); all overridable via env.
+TEMP="${TEMP:-1.0}"
+TOP_P="${TOP_P:-0.95}"
+TOP_K="${TOP_K:-20}"
+MIN_P="${MIN_P:-0.0}"
+PRESENCE_PENALTY="${PRESENCE_PENALTY:-0.0}"
 
 # Probe window: how long to wait before deciding MTP startup failed.
 # The 11GB IQ2_M model loading off NFS can take several minutes on a cold
@@ -70,8 +75,10 @@ CTVD="${CTVD:-auto}"
 # Context/GPU-layer fitting:
 #   - If CTX_SIZE is "auto" (or empty): --fit on + no -ngl so llama-cpp
 #     auto-tunes BOTH GPU layers and context to available VRAM.
-#   - If CTX_SIZE is a number (default 32768): -ngl all + explicit --ctx-size.
-#     No --fit (it aborts when -ngl is pinned by the user).
+#   - If CTX_SIZE is a number (default 32768): -ngl all + explicit --ctx-size
+#     + --fit off. (The binary defaults to --fit on; with ngl and ctx pinned
+#     the fit helper can only warn "n_gpu_layers already set by user" and
+#     abort its own pass, so disable it explicitly.)
 # -----------------------------------------------------------------------------
 CTX_SIZE="${CTX_SIZE:-32768}"
 if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
@@ -98,14 +105,14 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     --log-timestamps
     --log-prefix
     --temp "${TEMP}"
-    --top-p 0.95
-    --top-k 20
-    --min-p 0.00
+    --top-p "${TOP_P}"
+    --top-k "${TOP_K}"
+    --min-p "${MIN_P}"
     --repeat-penalty 1.0
-    --presence-penalty 0.0
+    --presence-penalty "${PRESENCE_PENALTY}"
   )
 else
-  # Explicit ctx mode: pin context + ngl, no --fit
+  # Explicit ctx mode: pin context + ngl, disable the fit helper
   base_args=(
     llama-server
     -m "${MODEL_PATH}"
@@ -113,6 +120,7 @@ else
     --host "${HOST}" --port "${PORT}"
     -ngl "${NGL:-all}"
     -fa on
+    --fit off
     --ctx-size "${CTX_SIZE}"
     --kv-unified
     --cache-type-k "${CTK}"
@@ -128,11 +136,11 @@ else
     --log-timestamps
     --log-prefix
     --temp "${TEMP}"
-    --top-p 0.95
-    --top-k 20
-    --min-p 0.00
+    --top-p "${TOP_P}"
+    --top-k "${TOP_K}"
+    --min-p "${MIN_P}"
     --repeat-penalty 1.0
-    --presence-penalty 0.0
+    --presence-penalty "${PRESENCE_PENALTY}"
   )
 fi
 
