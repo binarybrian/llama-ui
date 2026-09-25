@@ -54,10 +54,11 @@ CUDA_ARCH="${CUDA_ARCH:-89-real;89}"
 KVSTREAM_ARGS=(--build-arg KV_STREAM="$KV_STREAM")
 if [[ $KV_STREAM -eq 1 ]]; then
   case "$LLAMA_TAG" in
+    b11179) KV_STREAM_PATCH="adaptive-kv-stream-b11179.patch" ;;
     b11115) KV_STREAM_PATCH="adaptive-kv-stream-b11115.patch" ;;
     b10729) KV_STREAM_PATCH="adaptive-kv-stream-b10729.patch" ;;
     *)
-      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: b11115, b10729 — see patches/)" >&2
+      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: b11179, b11115, b10729 — see patches/)" >&2
       exit 1
       ;;
   esac
