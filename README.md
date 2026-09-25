@@ -161,24 +161,28 @@ Reference values for the production config (Qwen3.8-27B IQ3_S,
 
 | Consumer | Host RAM |
 | --- | --- |
-| Pinned KV cache (full ctx) | `CTX × kv_layers × n_blocks × (block_K + block_V)` with `n_blocks = n_head_kv × head_dim / 128`. Qwen3.8-27B: **17 KV layers** (16 full-attention, every 4th, + MTP) × 4 KV heads × 256 dim = 8 blocks/tensor → ≈69 KiB/token (q8_0 K/V) or ≈47 KiB/token (q8_0/q5_0) → **~8.6 GiB** (q8_0 K/V) or **~5.9 GiB** (q8_0/q5_0) at `CTX_SIZE=131072` |
+| Pinned KV cache (full ctx) | `CTX × kv_layers × n_blocks × (block_K + block_V)`, `n_blocks = n_head_kv × head_dim / 32` (ggml "_0" quants use 32-element blocks: q8_0 = 34 B, q5_0 = 22 B, q4_0 = 18 B). Qwen3.8-27B: **16 KV layers** (full-attention, every 4th) × 4 KV heads × 256 dim = 32 blocks/tensor → 1088 B/token q8_0, 704 B/token q5_0 → **3584 MiB** (q8_0/q5_0) or **4352 MiB** (q8_0 K/V) at `CTX_SIZE=131072` |
 | mmproj on CPU (`--no-mmproj-offload`) | ~1–2 GB (= the mmproj file size) |
 | Model GGUF via mmap (page cache, reclaimable) | ~11 GB |
 | Server / threadpool / misc | ~1 GB |
-| **Resident total (q8_0 K/V, excl. page cache)** | **~11–13 GB** |
+| **Resident total (q8_0/q5_0, mmproj on GPU, excl. page cache)** | **~4.5–5 GB** |
 
 - Qwen3.8-27B is a **hybrid** model: 3 of every 4 layers are linear
   attention (gated delta net) with a fixed-size state that does *not*
-  scale with ctx — with `-ngl all` that state lives on the GPU. Only the
-  full-attention layers (16 in the trunk + the MTP layer) carry a
-  per-token KV cache, which is what `--kv-stream` pins in host RAM.
+  scale with ctx — with `-ngl all` that state (~0.6 GiB) lives on the
+  GPU. Only the 16 full-attention layers carry a per-token KV cache,
+  which is what `--kv-stream` pins in host RAM. The MTP module (blk.64)
+  keeps its own 1-layer KV cache (q8_0/q8_0) in the draft context — a
+  few MiB, on the GPU.
 - The KV pool (`KV_STREAM_STAGE_MIB`) lives entirely on the GPU; it adds
   no host RAM beyond bookkeeping. What *does* scale with ctx on the host
   is the pinned KV cache — it grows linearly with `CTX_SIZE` and with the
-  K/V cache types (per element: f16/bf16 2 B, q8_0 1.016 B, q4_0 1.063 B,
-  q5_0 0.75 B).
-- Exact per-layer KV sizes are printed at startup (`KV buffer size =
-  ... MiB` lines) — use those rather than the estimates above.
+  K/V cache types.
+- The startup log prints the exact sizes (`llama_kv_cache: size = ... MiB
+  ( N cells, N layers ...), K (...): ... MiB, V (...): ... MiB`) — but
+  b11179 classifies library INFO lines as TRACE, so they are hidden at
+  the default `-lv 3`. Restart the container with `-lv 4` (or more) in
+  the server flags to see them.
 - Pinned KV is not reclaimable, so it is what determines the host-RAM
   floor for a given context size.
 
