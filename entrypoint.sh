@@ -35,6 +35,11 @@ TOP_K="${TOP_K:-20}"
 MIN_P="${MIN_P:-0.0}"
 PRESENCE_PENALTY="${PRESENCE_PENALTY:-0.0}"
 
+# Log verbosity (-lv). Note: b11179 classifies library INFO lines (model
+# arch block, KV buffer sizes, "block KV streaming enabled") as TRACE, so
+# they are hidden at the default 3 — set LOG_VERBOSITY=4+ to see them.
+LOG_VERBOSITY="${LOG_VERBOSITY:-3}"
+
 # Probe window: how long to wait before deciding MTP startup failed.
 # The 11GB IQ2_M model loading off NFS can take several minutes on a cold
 # read; 600s is a safe upper bound. On TrueNAS with local SSD it'll be ~15s.
@@ -143,6 +148,8 @@ else
     --presence-penalty "${PRESENCE_PENALTY}"
   )
 fi
+
+base_args+=( -lv "${LOG_VERBOSITY}" )
 
 # Add --agent if AGENT is enabled (CORS proxy + all built-in tools).
 if [[ "${AGENT}" == "1" || "${AGENT}" == "on" ]]; then

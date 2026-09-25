@@ -114,6 +114,7 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `TOP_K` | `20` | Top-k sampling (0 = disabled) |
 | `MIN_P` | `0.0` | Min-p sampling (0.0 = disabled) |
 | `PRESENCE_PENALTY` | `0.0` | Repeat presence penalty |
+| `LOG_VERBOSITY` | `3` | Server log verbosity (`-lv`). b11179 hides library INFO lines (model arch block, `KV buffer size`, "block KV streaming enabled") at the default 3 — use `4`+ to see them in docker logs |
 | `KV_STREAM_STAGE_MIB` | `0` | Adaptive KV streaming (ring buffer) staging pool in MiB. Only effective on `--kv-stream` builds (`0` = disabled); on other builds the entrypoint warns and skips the flag |
 
 Sampling defaults follow the Qwen3.8-27B recommended thinking-mode settings ([byteshape/Qwen3.8-27B-GGUF](https://huggingface.co/byteshape/Qwen3.8-27B-GGUF)).
@@ -181,8 +182,8 @@ Reference values for the production config (Qwen3.8-27B IQ3_S,
 - The startup log prints the exact sizes (`llama_kv_cache: size = ... MiB
   ( N cells, N layers ...), K (...): ... MiB, V (...): ... MiB`) — but
   b11179 classifies library INFO lines as TRACE, so they are hidden at
-  the default `-lv 3`. Restart the container with `-lv 4` (or more) in
-  the server flags to see them.
+  the default `-lv 3`. Set `LOG_VERBOSITY=4` (or more) in the app env to
+  see them in docker logs.
 - Pinned KV is not reclaimable, so it is what determines the host-RAM
   floor for a given context size.
 
