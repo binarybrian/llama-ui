@@ -59,7 +59,8 @@ docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
 Applies the adaptive KV streaming patch (derived from
 [RaymondHuang210129/llama.cpp-adaptive-kv-streaming](https://github.com/RaymondHuang210129/llama.cpp-adaptive-kv-streaming),
 branch `feature/adaptive-kv-stream`) on top of the standard build. The
-patch file is chosen by tag: `b11179` →
+patch file is chosen by tag: `b11200` →
+`patches/adaptive-kv-stream-b11200.patch`, `b11179` →
 `patches/adaptive-kv-stream-b11179.patch`, `b11115` →
 `patches/adaptive-kv-stream-b11115.patch`, `b10729` →
 `patches/adaptive-kv-stream-b10729.patch`; other tags error out in

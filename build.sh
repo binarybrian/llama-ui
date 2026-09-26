@@ -19,7 +19,9 @@ for arg in "$@"; do
       echo "  --local    Build locally only (no push to Docker Hub)"
   echo "  --kv-stream  Apply the adaptive KV streaming (ring buffer) patch from"
   echo "               RaymondHuang210129/llama.cpp-adaptive-kv-streaming."
-  echo "               The patch file is chosen by tag: b11115 ->"
+  echo "               The patch file is chosen by tag: b11200 ->"
+  echo "               adaptive-kv-stream-b11200.patch, b11179 ->"
+  echo "               adaptive-kv-stream-b11179.patch, b11115 ->"
   echo "               adaptive-kv-stream-b11115.patch, b10729 ->"
   echo "               adaptive-kv-stream-b10729.patch (other tags: error)."
       echo ""
@@ -54,11 +56,12 @@ CUDA_ARCH="${CUDA_ARCH:-89-real;89}"
 KVSTREAM_ARGS=(--build-arg KV_STREAM="$KV_STREAM")
 if [[ $KV_STREAM -eq 1 ]]; then
   case "$LLAMA_TAG" in
+    b11200) KV_STREAM_PATCH="adaptive-kv-stream-b11200.patch" ;;
     b11179) KV_STREAM_PATCH="adaptive-kv-stream-b11179.patch" ;;
     b11115) KV_STREAM_PATCH="adaptive-kv-stream-b11115.patch" ;;
     b10729) KV_STREAM_PATCH="adaptive-kv-stream-b10729.patch" ;;
     *)
-      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: b11179, b11115, b10729 — see patches/)" >&2
+      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: b11200, b11179, b11115, b10729 — see patches/)" >&2
       exit 1
       ;;
   esac
