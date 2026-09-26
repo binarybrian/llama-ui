@@ -31,6 +31,9 @@ services:
       - CTVD=auto
       - AGENT=1
       - CORS_ORIGINS=*
+      # Batch sizes. Unset = llama-server defaults (batch 2048, ubatch 512).
+      # - BATCH_SIZE=2048
+      # - UBATCH_SIZE=512
       # Adaptive KV streaming (ring buffer) staging pool in MiB. Only takes
       # effect on images built with ./build.sh --kv-stream; 0 = disabled.
       - KV_STREAM_STAGE_MIB=0

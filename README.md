@@ -102,6 +102,8 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `CTX_SIZE` | `auto` | Context window (`auto` lets `--fit` decide, or a number) |
 | `FIT_TARGET` | `256` | VRAM headroom in MiB for `--fit` (auto-fit mode only) |
 | `NGL` | `all` | GPU layers to offload (`all`, `auto`, or a number) |
+| `BATCH_SIZE` | unset | Logical batch size (`-b`). Unset keeps the llama-server default (2048) |
+| `UBATCH_SIZE` | unset | Physical batch size (`-ub`). Unset keeps the llama-server default (512) |
 | `CTK` | `auto` (→ q8_0) | KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
 | `CTV` | `auto` (→ q8_0) | KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
 | `CTKD` | `auto` (→ q8_0) | MTP draft KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |

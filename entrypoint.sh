@@ -151,6 +151,16 @@ fi
 
 base_args+=( -lv "${LOG_VERBOSITY}" )
 
+# Logical/physical batch sizes (-b / -ub). Unset = leave the flags off so
+# llama-server keeps its built-in defaults (n_batch 2048, n_ubatch 512 —
+# tools/server + common defaults).
+if [[ -n "${BATCH_SIZE:-}" ]]; then
+  base_args+=( -b "${BATCH_SIZE}" )
+fi
+if [[ -n "${UBATCH_SIZE:-}" ]]; then
+  base_args+=( -ub "${UBATCH_SIZE}" )
+fi
+
 # Add --agent if AGENT is enabled (CORS proxy + all built-in tools).
 if [[ "${AGENT}" == "1" || "${AGENT}" == "on" ]]; then
   base_args+=( --agent )
