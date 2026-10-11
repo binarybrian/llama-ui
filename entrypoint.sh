@@ -87,6 +87,7 @@ CTVD="${CTVD:-auto}"
 # -----------------------------------------------------------------------------
 CTX_SIZE="${CTX_SIZE:-32768}"
 if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
+  CTX_MODE=auto
   # Auto-fit mode: let --fit determine ngl + ctx to match free VRAM
   base_args=(
     llama-server
@@ -117,6 +118,7 @@ if [[ -z "${CTX_SIZE}" ]] || [[ "${CTX_SIZE}" == "auto" ]]; then
     --presence-penalty "${PRESENCE_PENALTY}"
   )
 else
+  CTX_MODE=pinned
   # Explicit ctx mode: pin context + ngl, disable the fit helper
   base_args=(
     llama-server
@@ -189,16 +191,20 @@ if [[ -n "${TOOLS_VAL}" ]]; then
   base_args+=( --tools "${TOOLS_VAL}" )
 fi
 
-# Adaptive KV streaming (ring buffer) staging pool in MiB. Only exists in
-# --kv-stream image builds; 0 (default) leaves the flag unset. Probe the
-# binary so a mismatched image (patch not applied) degrades to plain decode
-# instead of dying on an unknown flag.
-KV_STREAM_STAGE_MIB="${KV_STREAM_STAGE_MIB:-0}"
-if [[ "${KV_STREAM_STAGE_MIB}" != "0" && -n "${KV_STREAM_STAGE_MIB}" ]]; then
-  if { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--kv-stream-stage-mib"; then
-    base_args+=( --kv-stream-stage-mib "${KV_STREAM_STAGE_MIB}" )
+# Adaptive KV streaming V2: shared device-local phase arena in MiB (bounded
+# budget shared between the streaming KV working set and compute workspaces).
+# Only exists in --kv-stream image builds; 0 (default) leaves the flag unset.
+# Probe the binary so a mismatched image (patch not applied) degrades to plain
+# decode instead of dying on an unknown flag. The arena requires -fa on +
+# --fit off, so it is skipped in auto-fit mode (CTX_SIZE=auto).
+KV_STREAM_ARENA_MIB="${KV_STREAM_ARENA_MIB:-0}"
+if [[ "${KV_STREAM_ARENA_MIB}" != "0" && -n "${KV_STREAM_ARENA_MIB}" ]]; then
+  if [[ "${CTX_MODE}" == "auto" ]]; then
+    echo "WARN: KV_STREAM_ARENA_MIB=${KV_STREAM_ARENA_MIB} set, but CTX_SIZE=auto runs --fit on, which conflicts with the KV-stream arena (--fit off required); continuing without it" >&2
+  elif { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--kv-stream-arena-mib"; then
+    base_args+=( --kv-stream-arena-mib "${KV_STREAM_ARENA_MIB}" )
   else
-    echo "WARN: KV_STREAM_STAGE_MIB=${KV_STREAM_STAGE_MIB} set, but this llama-server has no --kv-stream-stage-mib (not a --kv-stream build); continuing without it" >&2
+    echo "WARN: KV_STREAM_ARENA_MIB=${KV_STREAM_ARENA_MIB} set, but this llama-server has no --kv-stream-arena-mib (not a --kv-stream build); continuing without it" >&2
   fi
 fi
 

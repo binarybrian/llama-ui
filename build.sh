@@ -14,25 +14,25 @@ for arg in "$@"; do
     --help|-h)
       echo "Usage: ./build.sh [VERSION] [--local] [--kv-stream]"
       echo ""
-      echo "  VERSION    llama.cpp release tag (e.g. b10729). Defaults to latest"
+      echo "  VERSION    llama.cpp release tag (e.g. b11559). Defaults to latest"
       echo "             release including pre-releases (the rolling bNNNN series)."
       echo "  --local    Build locally only (no push to Docker Hub)"
-  echo "  --kv-stream  Apply the adaptive KV streaming (ring buffer) patch from"
-  echo "               RaymondHuang210129/llama.cpp-adaptive-kv-streaming."
-  echo "               The patch file is chosen by tag: b11200 ->"
-  echo "               adaptive-kv-stream-b11200.patch, b11179 ->"
-  echo "               adaptive-kv-stream-b11179.patch, b11115 ->"
-  echo "               adaptive-kv-stream-b11115.patch, b10729 ->"
-  echo "               adaptive-kv-stream-b10729.patch (other tags: error)."
+      echo "  --kv-stream  Apply the adaptive KV streaming V2 (shared device arena)"
+      echo "               patch from RaymondHuang210129/llama.cpp-adaptive-kv-streaming,"
+      echo "               branch feature/adaptive-kv-stream-v2. The patch file is"
+      echo "               chosen by tag: b11559 ->"
+      echo "               adaptive-kv-stream-v2-b11559.patch (other tags: error)."
+      echo "               Adds --kv-stream-arena-mib (preferred) and legacy"
+      echo "               --kv-stream-pool-mib; requires -fa on + --fit off."
       echo ""
       echo "Environment:"
       echo "  CUDA_ARCH  CUDA architectures (default: 89-real;89 for RTX 4060 Ti)"
       echo ""
       echo "Examples:"
       echo "  ./build.sh                       # Latest pre-release, build + push"
-      echo "  ./build.sh b10729                # Specific tag, build + push"
+      echo "  ./build.sh b11559                # Specific tag, build + push"
       echo "  ./build.sh --local               # Latest pre-release, local only"
-      echo "  ./build.sh --kv-stream --local   # Latest + ring buffer patch, local only"
+      echo "  ./build.sh b11559 --kv-stream --local  # Pinned tag + V2 patch, local only"
       echo "  CUDA_ARCH=86-real ./build.sh     # Override CUDA arch (e.g. RTX 30-series)"
       exit 0
       ;;
@@ -56,12 +56,9 @@ CUDA_ARCH="${CUDA_ARCH:-89-real;89}"
 KVSTREAM_ARGS=(--build-arg KV_STREAM="$KV_STREAM")
 if [[ $KV_STREAM -eq 1 ]]; then
   case "$LLAMA_TAG" in
-    b11200) KV_STREAM_PATCH="adaptive-kv-stream-b11200.patch" ;;
-    b11179) KV_STREAM_PATCH="adaptive-kv-stream-b11179.patch" ;;
-    b11115) KV_STREAM_PATCH="adaptive-kv-stream-b11115.patch" ;;
-    b10729) KV_STREAM_PATCH="adaptive-kv-stream-b10729.patch" ;;
+    b11559) KV_STREAM_PATCH="adaptive-kv-stream-v2-b11559.patch" ;;
     *)
-      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: b11200, b11179, b11115, b10729 — see patches/)" >&2
+      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: b11559 (V2) — see patches/)" >&2
       exit 1
       ;;
   esac

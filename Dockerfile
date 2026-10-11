@@ -5,16 +5,16 @@
 # Built against CUDA 12.8 toolkit to match TrueNAS driver 570.172.08.
 # CPU flags target AMD Ryzen 9 3900X (Zen 2): AVX2/BMI2/F16C/FMA3/SSE4.2 only.
 # cmake flag set mirrors the Gentoo ebuild sci-misc/llama-cpp-0_pre10636.ebuild.
-# Optional KV-stream (adaptive KV ring buffer) variant: build arg KV_STREAM=1
-# applies patches/$KV_STREAM_PATCH (per-base: adaptive-kv-stream-b11200.patch
-# for b11200, b11179, b11115, b10729; picked by build.sh).
+# Optional KV-stream (adaptive KV streaming V2, shared device arena) variant:
+# build arg KV_STREAM=1 applies patches/$KV_STREAM_PATCH (per-base:
+# adaptive-kv-stream-v2-b11559.patch for b11559; picked by build.sh).
 # =============================================================================
 
 # ---------- Stage 1: UI build (Node) ------------------------------------------
 FROM node:22-bookworm-slim AS ui-builder
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-ARG LLAMA_TAG=b11200
+ARG LLAMA_TAG=b11559
 RUN git clone --depth 1 --branch "${LLAMA_TAG}" https://github.com/ggml-org/llama.cpp.git /src/llama.cpp
 WORKDIR /src/llama.cpp/tools/ui
 # Populates build.json (the UI's build-version display). CMake's own npm
@@ -39,10 +39,10 @@ RUN test -f dist/index.html && test -f dist/build.json && test -d dist/_app \
 
 # ---------- Stage 2: llama.cpp build (CUDA 12.8 devel) ------------------------
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS builder
-ARG LLAMA_TAG=b11200
+ARG LLAMA_TAG=b11559
 ARG CMAKE_CUDA_ARCHITECTURES=89-real;89
 ARG KV_STREAM=0
-ARG KV_STREAM_PATCH=adaptive-kv-stream-b11200.patch
+ARG KV_STREAM_PATCH=adaptive-kv-stream-v2-b11559.patch
 ARG LLAMA_BUILD_SUFFIX=""
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -63,7 +63,7 @@ RUN git clone --depth 1 --branch "${LLAMA_TAG}" \
         https://github.com/ggml-org/llama.cpp.git /src/llama.cpp
 WORKDIR /src/llama.cpp
 
-# Optional adaptive KV streaming (ring buffer) patch. Each patch file is
+# Optional adaptive KV streaming V2 patch. Each patch file is
 # generated against a specific upstream tag (see patches/); --check fails the
 # build loudly if KV_STREAM_PATCH does not match the fetched LLAMA_TAG.
 COPY patches/${KV_STREAM_PATCH} /tmp/kvstream.patch

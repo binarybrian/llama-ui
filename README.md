@@ -41,34 +41,39 @@ Ada has native F16 tensor cores but lacks native BF16 support.
 ```
 
 `./build.sh` defaults to the latest release **including pre-releases** (the
-rolling `bNNNN` series); pass a tag to pin it (e.g. `./build.sh b10729 --local`).
+rolling `bNNNN` series); pass a tag to pin it (e.g. `./build.sh b11559 --local`).
 
 Override the CUDA arch or llama.cpp tag via build args if needed:
 
 ```sh
 docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
-  --build-arg LLAMA_TAG=b10729 -t llama-cpp:local .
+  --build-arg LLAMA_TAG=b11559 -t llama-cpp:local .
 ```
 
-### Adaptive KV streaming (ring buffer) variant
+### Adaptive KV streaming V2 (shared device arena) variant
 
 ```sh
-./build.sh --kv-stream --local
+./build.sh b11559 --kv-stream --local
 ```
 
-Applies the adaptive KV streaming patch (derived from
+Applies the adaptive KV streaming **V2** patch (derived from
 [RaymondHuang210129/llama.cpp-adaptive-kv-streaming](https://github.com/RaymondHuang210129/llama.cpp-adaptive-kv-streaming),
-branch `feature/adaptive-kv-stream`) on top of the standard build. The
-patch file is chosen by tag: `b11200` →
-`patches/adaptive-kv-stream-b11200.patch`, `b11179` →
-`patches/adaptive-kv-stream-b11179.patch`, `b11115` →
-`patches/adaptive-kv-stream-b11115.patch`, `b10729` →
-`patches/adaptive-kv-stream-b10729.patch`; other tags error out in
+branch `feature/adaptive-kv-stream-v2`) on top of the standard build. V2
+keeps the complete KV history in pinned host RAM and serves attention from
+a bounded, device-local arena of resident pages plus one shared ring; the
+same arena is phase-shared with compute workspaces (and the vision
+projector). The patch file is chosen by tag: `b11559` →
+`patches/adaptive-kv-stream-v2-b11559.patch`; other tags error out in
 `build.sh`, and a mismatched base would fail the `git apply --check` guard
-in the Dockerfile. The binary gains `--kv-stream-stage-mib N` (staging
-pool in MiB, 0 = off), exposed as the `KV_STREAM_STAGE_MIB` env var. If
-that env var is set on a non-`--kv-stream` image, the entrypoint detects
-the missing flag and continues without it instead of failing startup.
+in the Dockerfile. The binary gains `--kv-stream-arena-mib N` (shared
+arena MiB; requires `-fa on` + `--fit off`, auto-derived MTP KV layer
+count) and the legacy `--kv-stream-pool-mib N`, exposed as the
+`KV_STREAM_ARENA_MIB` env var. If that env var is set on a
+non-`--kv-stream` image, the entrypoint detects the missing flag and
+continues without it instead of failing startup; it also skips the arena
+in `CTX_SIZE=auto` mode, which runs `--fit on`. Note V2 renamed the old
+`--kv-stream-stage-mib` flag (V1 patches, removed) to
+`--kv-stream-pool-mib`.
 
 ## Publishing
 
@@ -118,7 +123,7 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `MIN_P` | `0.0` | Min-p sampling (0.0 = disabled) |
 | `PRESENCE_PENALTY` | `0.0` | Repeat presence penalty |
 | `LOG_VERBOSITY` | `3` | Server log verbosity (`-lv`). b11179 hides library INFO lines (model arch block, `KV buffer size`, "block KV streaming enabled") at the default 3 — use `4`+ to see them in docker logs |
-| `KV_STREAM_STAGE_MIB` | `0` | Adaptive KV streaming (ring buffer) staging pool in MiB. Only effective on `--kv-stream` builds (`0` = disabled); on other builds the entrypoint warns and skips the flag |
+| `KV_STREAM_ARENA_MIB` | `0` | Adaptive KV streaming V2 shared device arena in MiB (streaming KV working set + compute workspaces). Only effective on `--kv-stream` builds (`0` = disabled); on other builds the entrypoint warns and skips the flag, and it is also skipped in `CTX_SIZE=auto` (conflicts with `--fit on`) |
 
 Sampling defaults follow the Qwen3.8-27B recommended thinking-mode settings ([byteshape/Qwen3.8-27B-GGUF](https://huggingface.co/byteshape/Qwen3.8-27B-GGUF)).
 
@@ -160,7 +165,7 @@ and host-side work fan out over every core.
 
 **System RAM** — no internal cap; usage is driven by your configuration.
 Reference values for the production config (Qwen3.8-27B IQ3_S,
-`CTX_SIZE=131072`, `CTK=q8_0 CTV=q8_0`, `KV_STREAM_STAGE_MIB=2048`,
+`CTX_SIZE=131072`, `CTK=q8_0 CTV=q8_0`, `KV_STREAM_ARENA_MIB=2048`,
 `MMPROJ_OFFLOAD=0`):
 
 | Consumer | Host RAM |
@@ -178,10 +183,12 @@ Reference values for the production config (Qwen3.8-27B IQ3_S,
   which is what `--kv-stream` pins in host RAM. The MTP module (blk.64)
   keeps its own 1-layer KV cache (q8_0/q8_0) in the draft context — a
   few MiB, on the GPU.
-- The KV pool (`KV_STREAM_STAGE_MIB`) lives entirely on the GPU; it adds
-  no host RAM beyond bookkeeping. What *does* scale with ctx on the host
-  is the pinned KV cache — it grows linearly with `CTX_SIZE` and with the
-  K/V cache types.
+- The KV-stream V2 arena (`KV_STREAM_ARENA_MIB`) is a bounded GPU budget
+  shared between the streaming KV working set and compute workspaces; it
+  adds no host RAM beyond bookkeeping. What *does* scale with ctx on the
+  host is the pinned KV cache — it grows linearly with `CTX_SIZE` and with
+  the K/V cache types (with streaming on, that pinned history is
+  authoritative and GPU pages stream from it).
 - The startup log prints the exact sizes (`llama_kv_cache: size = ... MiB
   ( N cells, N layers ...), K (...): ... MiB, V (...): ... MiB`) — but
   b11179 classifies library INFO lines as TRACE, so they are hidden at
