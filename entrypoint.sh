@@ -161,6 +161,15 @@ if [[ -n "${UBATCH_SIZE:-}" ]]; then
   base_args+=( -ub "${UBATCH_SIZE}" )
 fi
 
+# Idle model sleep (--sleep-idle-seconds N): after N seconds without requests
+# the server sleeps and releases model weights + KV, re-loading on the next
+# request. llama.cpp (>= b11xxx) replaced the old --keep-alive with this flag;
+# unset = leave it off so llama-server keeps its built-in default (-1, never
+# sleep — i.e. weights resident forever).
+if [[ -n "${SLEEP_IDLE_SECONDS:-}" ]]; then
+  base_args+=( --sleep-idle-seconds "${SLEEP_IDLE_SECONDS}" )
+fi
+
 # Add --agent if AGENT is enabled (CORS proxy + all built-in tools).
 if [[ "${AGENT}" == "1" || "${AGENT}" == "on" ]]; then
   base_args+=( --agent )
