@@ -75,6 +75,51 @@ in `CTX_SIZE=auto` mode, which runs `--fit on`. Note V2 renamed the old
 `--kv-stream-stage-mib` flag (V1 patches, removed) to
 `--kv-stream-pool-mib`.
 
+### KV-stream V2 hard rules + 4060 Ti qualification (b11559)
+
+Hard startup rules enforced by the patch — violations exit at model-load
+time, before any weights load:
+
+- `CTX_SIZE` must be a number: `auto` runs `--fit on`, and the entrypoint
+  skips the arena in that mode.
+- **Vision + arena is hard-qualified to `CTK=q8_0 CTV=q4_0`** — with both
+  `MMPROJ_PATH` and the arena set, any other cache types are rejected
+  (`vision arena is currently qualified with -fa on, Q8_0 K and Q4_0 V`).
+  Text-only arena (no mmproj) is not gated.
+- Attached MTP inherits the target's KV types: set `CTKD`/`CTVD` equal to
+  `CTK`/`CTV` (the `auto` default resolves to q8_0, which mismatches a
+  q4_0 V and gets rejected). Draft lengths 1–3; keep
+  `SPEC_DRAFT_N_MAX` in that range.
+- `MMPROJ_OFFLOAD=1` — CPU projector offload is rejected on
+  vision+arena builds.
+
+Qualification run (2026-10-11, RTX 4060 Ti 16 GB — first real-hardware
+SM89 result; the fork itself qualified SM120 hardware only):
+Qwen3.8-27B GSQ-RCO IQ3_XXS-mtp (9.72 GiB, 3.05 bpw mixed),
+`CTX_SIZE=131072`, `CTK=q8_0 CTV=q4_0 CTKD=q8_0 CTVD=q4_0`,
+`TRY_MTP=1 SPEC_DRAFT_N_MAX=2`, `KV_STREAM_ARENA_MIB=2048`,
+Q8_0 mmproj offloaded, `UBATCH_SIZE=512`.
+
+- Startup: the full **3328 MiB** KV history pinned in host RAM; the GPU
+  holds only the 2 GiB arena. MTP auxiliary KV layer auto-derived from
+  model metadata (`nextn_predict_layers = 1`).
+- Phase arena re-lays out per phase: prefill ≈ 776 MiB compute /
+  1153 MiB KV pool; decode ≈ 15 MiB compute / 2129 MiB KV pool
+  (761 MiB reclaimed from the prefill workspace).
+- ≈75K tokens fit fully resident at 2048 MiB (293 pages × 256 tokens +
+  ring slots); beyond that `streaming=1` and `KV_reload` H2D traffic
+  appears — that is the feature working, not a fault.
+- The Q8_0 mmproj was accepted (fork docs qualified only F16): the
+  projector borrows arena regions, KV suspends for image batches and
+  refills afterwards (695 MiB H2D in ~52 ms).
+- Speed: prefill ~570 t/s, decode **~16.7 t/s** at 22–26K ctx with MTP
+  draft-2 active.
+
+Boot-time confirmation lines (WARN level, visible even at `-lv 3`):
+`KV stream bootstrap pool ... authoritative host ...`,
+`vision arena enabled`, and the `memory_phase:` lines on phase
+switches.
+
 ## Publishing
 
 ```sh
@@ -150,6 +195,14 @@ MTP draft KV cache defaults to f16 upstream — the `auto` sentinel sets
 it to q8_0, saving ~0.75 GB vs f16. For even more VRAM, set CTKD/CTVD
 to q4_0 (draft quality matters less since rejected drafts are discarded).
 
+> **On `--kv-stream` builds this block mostly doesn't apply.** KV no
+> longer consumes VRAM (the arena budget is fixed; growing `CTX_SIZE`
+> grows pinned *host* RAM instead), and two knobs above become invalid:
+> `CTKD`/`CTVD` must match `CTK`/`CTV` (attached MTP inherits the
+> target's types), and `MMPROJ_OFFLOAD` must stay `1` on vision+arena
+> builds. If the arena itself won't admit at startup, raise
+> `KV_STREAM_ARENA_MIB` or shrink `UBATCH_SIZE` — not `CTX_SIZE`.
+
 Stop ffmpeg or other GPU processes first (`nvidia-smi` to check). Each
 364 MB of foreign VRAM usage is ~3.5K tokens of context you lose.
 
@@ -164,17 +217,17 @@ With `-ngl all` most math is on the GPU, but prompt processing, sampling,
 and host-side work fan out over every core.
 
 **System RAM** — no internal cap; usage is driven by your configuration.
-Reference values for the production config (Qwen3.8-27B IQ3_S,
-`CTX_SIZE=131072`, `CTK=q8_0 CTV=q8_0`, `KV_STREAM_ARENA_MIB=2048`,
-`MMPROJ_OFFLOAD=0`):
+Reference values for the production config (Qwen3.8-27B IQ3_XXS mixed
+quant, `CTX_SIZE=131072`, `CTK=q8_0 CTV=q4_0`, `KV_STREAM_ARENA_MIB=2048`,
+`MMPROJ_OFFLOAD=1`):
 
 | Consumer | Host RAM |
 | --- | --- |
-| Pinned KV cache (full ctx) | `CTX × kv_layers × n_blocks × (block_K + block_V)`, `n_blocks = n_head_kv × head_dim / 32` (ggml "_0" quants use 32-element blocks: q8_0 = 34 B, q5_0 = 22 B, q4_0 = 18 B). Qwen3.8-27B: **16 KV layers** (full-attention, every 4th) × 4 KV heads × 256 dim = 32 blocks/tensor → 1088 B/token q8_0, 704 B/token q5_0 → **3584 MiB** (q8_0/q5_0) or **4352 MiB** (q8_0 K/V) at `CTX_SIZE=131072` |
-| mmproj on CPU (`--no-mmproj-offload`) | ~1–2 GB (= the mmproj file size) |
+| Pinned KV cache (full ctx) | `CTX × kv_layers × n_blocks × (block_K + block_V)`, `n_blocks = n_head_kv × head_dim / 32` (ggml "_0" quants use 32-element blocks: q8_0 = 34 B, q5_0 = 22 B, q4_0 = 18 B). Qwen3.8-27B: **16 KV layers** (full-attention, every 4th) × 4 KV heads × 256 dim = 32 blocks/tensor → 1088 B/token/layer q8_0, 704 B q5_0, 576 B q4_0 → **3328 MiB** (q8_0 K / q4_0 V — current production, matches the `KV buffer size` log line), 3584 MiB (q8_0/q5_0), 4352 MiB (q8_0 K/V) at `CTX_SIZE=131072` |
+| mmproj Q8_0 (`--mmproj-offload`, arena-managed on `--kv-stream` builds) | negligible — weights are borrowed into arena (GPU) regions only during image batches |
 | Model GGUF via mmap (page cache, reclaimable) | ~11 GB |
 | Server / threadpool / misc | ~1 GB |
-| **Resident total (q8_0/q5_0, mmproj on GPU, excl. page cache)** | **~4.5–5 GB** |
+| **Resident total (q8_0 K / q4_0 V + MTP host history, mmproj on GPU, excl. page cache)** | **~4.5–5 GB** |
 
 - Qwen3.8-27B is a **hybrid** model: 3 of every 4 layers are linear
   attention (gated delta net) with a fixed-size state that does *not*
