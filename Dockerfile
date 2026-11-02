@@ -14,13 +14,15 @@
 FROM node:22-bookworm-slim AS ui-builder
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-ARG LLAMA_TAG=b11559
+ARG LLAMA_TAG=v0.8.0
+# numeric build number (v0.8.0 -> 11960); the semver tag itself is not a number
+ARG LLAMA_BUILD_NUMBER=11960
 RUN git clone --depth 1 --branch "${LLAMA_TAG}" https://github.com/ggml-org/llama.cpp.git /src/llama.cpp
 WORKDIR /src/llama.cpp/tools/ui
 # Populates build.json (the UI's build-version display). CMake's own npm
 # build path passes the same raw number; without it the vite plugin falls
 # back to "b0000".
-ENV LLAMA_BUILD_NUMBER=${LLAMA_TAG#b}
+ENV LLAMA_BUILD_NUMBER=${LLAMA_BUILD_NUMBER}
 # Configure npm: offline-friendly, no telemetry, no fund/audit noise
 RUN npm config set cache /tmp/.npm \
  && npm config set audit false \
@@ -39,10 +41,11 @@ RUN test -f dist/index.html && test -f dist/build.json && test -d dist/_app \
 
 # ---------- Stage 2: llama.cpp build (CUDA 12.8 devel) ------------------------
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS builder
-ARG LLAMA_TAG=b11559
+ARG LLAMA_TAG=v0.8.0
+ARG LLAMA_BUILD_NUMBER=11960
 ARG CMAKE_CUDA_ARCHITECTURES=89-real;89
 ARG KV_STREAM=0
-ARG KV_STREAM_PATCH=adaptive-kv-stream-v2-b11559.patch
+ARG KV_STREAM_PATCH=adaptive-kv-stream-v2-v0.8.0.patch
 ARG LLAMA_BUILD_SUFFIX=""
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -78,7 +81,7 @@ COPY --from=ui-builder /src/llama.cpp/tools/ui/dist ./tools/ui/dist
 
 # Build-info injection (derived from LLAMA_TAG build arg; +kvstream suffix
 # identifies the patched variant in the UI and /metrics)
-ENV LLAMA_BUILD_NUMBER=${LLAMA_TAG#b}
+ENV LLAMA_BUILD_NUMBER=${LLAMA_BUILD_NUMBER}
 ENV LLAMA_BUILD_COMMIT=${LLAMA_TAG}${LLAMA_BUILD_SUFFIX}
 
 # cmake configure — flag set mirrors the Gentoo ebuild src_configure():
@@ -101,7 +104,7 @@ RUN cmake -S . -B build \
         -DLLAMA_BUILD_UI=ON \
         -DLLAMA_USE_PREBUILT_UI=OFF \
         -DLLAMA_OPENSSL=ON \
-        -DLLAMA_BUILD_NUMBER=${LLAMA_TAG#b} \
+        -DLLAMA_BUILD_NUMBER=${LLAMA_BUILD_NUMBER} \
         -DLLAMA_BUILD_COMMIT=${LLAMA_TAG}${LLAMA_BUILD_SUFFIX} \
         -DGGML_NATIVE=OFF \
         -DGGML_RPC=ON \
@@ -127,7 +130,6 @@ RUN cmake -S . -B build \
         -DGGML_AVX_VNNI=OFF \
         -DGGML_AVX512_VNNI=OFF \
         -DGGML_AVX512_BF16=OFF \
-        -DGENTOO_REMOVE_CMAKE_BLAS_HACK=ON \
         -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs -Wl,-rpath-link,/usr/local/cuda/lib64/stubs" \
         -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs -Wl,-rpath-link,/usr/local/cuda/lib64/stubs"
 

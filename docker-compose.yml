@@ -5,7 +5,8 @@
 #
 # Host: 192.168.2.1   Port: 30084 (WebUI + OpenAI-compatible API)
 #
-# Image is published to Docker Hub (anonymous pull). The model files are
+# Image is published to Docker Hub (anonymous pull), built from llama.cpp
+# v0.8.0 (b11960) + the adaptive KV streaming V2 patch. The model files are
 # bind-mounted read-only from the vega pool — keep them on SSD for fast load.
 services:
   llama-ui:
@@ -18,27 +19,33 @@ services:
       # /mnt/vega/models on TrueNAS -> /models inside the container (read-only)
       - /mnt/vega/models:/models:ro
     environment:
-      # Qwen3.6-27B IQ2_M (fits 16GB VRAM with auto-fit context)
-      - MODEL_PATH=/models/qwen36-dau/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-IQ2_M.gguf
-      - MMPROJ_PATH=/models/qwen36-dau/mmproj-F16.gguf
-      - MMPROJ_OFFLOAD=0
-      - ALIAS=qwable-dau
-      - TRY_MTP=0
-      - CTX_SIZE=auto
-      - CTK=auto
-      - CTV=auto
-      - CTKD=auto
-      - CTVD=auto
+      # Huihui Qwen3.8-27B abliterated, GSQ-RCO IQ3_XXS mixed + MTP head
+      # (9.73 GiB, nextn_predict_layers = 1; same geometry as the qualified
+      # Qwen3.8-27B-GSQ-RCO-IQ3_XXS-mtp)
+      - MODEL_PATH=/models/qwen38-27b-hui/Huihui-Qwen3.8-27B-abliterated-GSQ-RCO-IQ3_XXS-mtp.gguf
+      - MMPROJ_PATH=/models/mmproj-Qwen3.8-27B-Q8_0.gguf
+      - MMPROJ_OFFLOAD=1
+      - ALIAS=qwen3.8-27b
+      - TRY_MTP=1
+      - SPEC_DRAFT_N_MAX=2
+      # Only consulted in CTX_SIZE=auto mode; inert here (the arena forces --fit off)
+      - FIT_TARGET=1024
+      - CTX_SIZE=131072
+      # arena qualification: q8_0 K / q4_0 V, and the MTP draft inherits them
+      - CTK=q8_0
+      - CTV=q4_0
+      - CTKD=q8_0
+      - CTVD=q4_0
       - AGENT=1
       - CORS_ORIGINS=*
-      # Batch sizes. Unset = llama-server defaults (batch 2048, ubatch 512).
-      # - BATCH_SIZE=2048
-      # - UBATCH_SIZE=512
+      - LOG_VERBOSITY=4
+      - UBATCH_SIZE=512
+      - SLEEP_IDLE_SECONDS=300
       # Adaptive KV streaming V2: shared device arena (streaming KV working
       # set + compute workspaces) in MiB. Only takes effect on images built
       # with ./build.sh --kv-stream; 0 = disabled. Requires CTX_SIZE=<number>
       # (not auto), which runs --fit off.
-      - KV_STREAM_ARENA_MIB=0
+      - KV_STREAM_ARENA_MIB=2048
     deploy:
       resources:
         reservations:

@@ -198,11 +198,13 @@ fi
 # decode instead of dying on an unknown flag. The arena requires -fa on +
 # --fit off, so it is skipped in auto-fit mode (CTX_SIZE=auto).
 KV_STREAM_ARENA_MIB="${KV_STREAM_ARENA_MIB:-0}"
+KV_ARENA_ACTIVE=0
 if [[ "${KV_STREAM_ARENA_MIB}" != "0" && -n "${KV_STREAM_ARENA_MIB}" ]]; then
   if [[ "${CTX_MODE}" == "auto" ]]; then
     echo "WARN: KV_STREAM_ARENA_MIB=${KV_STREAM_ARENA_MIB} set, but CTX_SIZE=auto runs --fit on, which conflicts with the KV-stream arena (--fit off required); continuing without it" >&2
   elif { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--kv-stream-arena-mib"; then
     base_args+=( --kv-stream-arena-mib "${KV_STREAM_ARENA_MIB}" )
+    KV_ARENA_ACTIVE=1
   else
     echo "WARN: KV_STREAM_ARENA_MIB=${KV_STREAM_ARENA_MIB} set, but this llama-server has no --kv-stream-arena-mib (not a --kv-stream build); continuing without it" >&2
   fi
@@ -233,9 +235,17 @@ mtp_args=(
   --spec-draft-p-split 0.10
   --spec-draft-p-min 0.6
   --spec-draft-ngl auto
-  --spec-draft-type-k "${CTKD}"
-  --spec-draft-type-v "${CTVD}"
 )
+# On an arena build the attached MTP context inherits the target KV types, and
+# explicit --spec-draft-type-k/-v overrides are rejected outright
+# ("adaptive KV speculation inherits target cache types"), which would drop the
+# whole MTP launch back to plain decode. Only pass them when no arena is active.
+if [[ "${KV_ARENA_ACTIVE}" != "1" ]]; then
+  mtp_args+=(
+    --spec-draft-type-k "${CTKD}"
+    --spec-draft-type-v "${CTVD}"
+  )
+fi
 
 # -----------------------------------------------------------------------------
 # Decide whether to try MTP (env override: TRY_MTP=0 to skip the probe entirely)

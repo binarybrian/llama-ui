@@ -20,10 +20,12 @@ interface on port 8080.
 ## Served model
 
 The image is model-agnostic — any GGUF model can be served by setting
-`MODEL_PATH` (and optionally `MMPROJ_PATH` for vision). The default config
-serves `Qwen3.6-27B-Fable-Fus-711-...IQ2_M.gguf` (~11.3 GB), which fits
-comfortably in 16 GB VRAM with auto-fit context allocation. Swap models by
-changing the env vars — no rebuild needed.
+`MODEL_PATH` (and optionally `MMPROJ_PATH` for vision). The shipped
+`docker-compose.yml` serves
+`Huihui-Qwen3.8-27B-abliterated-GSQ-RCO-IQ3_XXS-mtp.gguf` (9.73 GiB, ~3.05
+bpw mixed, MTP head included) with the KV-stream arena, mirroring the
+2026-10-11 4060 Ti qualification. Swap models by changing the env vars — no
+rebuild needed.
 
 For NVIDIA RTX 40-series (Ada Lovelace), use `mmproj-F16.gguf` (not BF16) —
 Ada has native F16 tensor cores but lacks native BF16 support.
@@ -40,20 +42,25 @@ Ada has native F16 tensor cores but lacks native BF16 support.
 ./build.sh --local
 ```
 
-`./build.sh` defaults to the latest release **including pre-releases** (the
-rolling `bNNNN` series); pass a tag to pin it (e.g. `./build.sh b11559 --local`).
+`./build.sh` defaults to the latest release **including pre-releases**; pass a
+tag to pin it. Both tag styles work: semver releases (`v0.8.0`) and the rolling
+`bNNNN` builds (`b11960`, the same commit). Semver tags are mapped back to their
+build number through the release's `nightly-tag.txt` asset, because
+`build-info.sh` emits `int LLAMA_BUILD_NUMBER = N;` and the Dockerfile forwards
+`--build-arg LLAMA_BUILD_NUMBER`.
 
 Override the CUDA arch or llama.cpp tag via build args if needed:
 
 ```sh
 docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
-  --build-arg LLAMA_TAG=b11559 -t llama-cpp:local .
+  --build-arg LLAMA_TAG=v0.8.0 --build-arg LLAMA_BUILD_NUMBER=11960 \
+  -t llama-cpp:local .
 ```
 
 ### Adaptive KV streaming V2 (shared device arena) variant
 
 ```sh
-./build.sh b11559 --kv-stream --local
+./build.sh v0.8.0 --kv-stream --local
 ```
 
 Applies the adaptive KV streaming **V2** patch (derived from
@@ -62,10 +69,11 @@ branch `feature/adaptive-kv-stream-v2`) on top of the standard build. V2
 keeps the complete KV history in pinned host RAM and serves attention from
 a bounded, device-local arena of resident pages plus one shared ring; the
 same arena is phase-shared with compute workspaces (and the vision
-projector). The patch file is chosen by tag: `b11559` →
-`patches/adaptive-kv-stream-v2-b11559.patch`; other tags error out in
-`build.sh`, and a mismatched base would fail the `git apply --check` guard
-in the Dockerfile. The binary gains `--kv-stream-arena-mib N` (shared
+projector). The patch file is chosen by tag: `v0.8.0` / `b11960` →
+`patches/adaptive-kv-stream-v2-v0.8.0.patch`, `b11559` →
+`patches/adaptive-kv-stream-v2-b11559.patch` (kept for rollback); other tags
+error out in `build.sh`, and a mismatched base would fail the
+`git apply --check` guard in the Dockerfile. The binary gains `--kv-stream-arena-mib N` (shared
 arena MiB; requires `-fa on` + `--fit off`, auto-derived MTP KV layer
 count) and the legacy `--kv-stream-pool-mib N`, exposed as the
 `KV_STREAM_ARENA_MIB` env var. If that env var is set on a
@@ -75,7 +83,76 @@ in `CTX_SIZE=auto` mode, which runs `--fit on`. Note V2 renamed the old
 `--kv-stream-stage-mib` flag (V1 patches, removed) to
 `--kv-stream-pool-mib`.
 
-### KV-stream V2 hard rules + 4060 Ti qualification (b11559)
+### Patch provenance (v0.8.0 / b11960)
+
+The v0.8.0 patch is not a re-generated copy of the fork's branch: the fork's
+`feature/adaptive-kv-stream-v2` tip (`7425d14`, 2026-11-01) is still based on
+upstream `10a60cf` ≈ `b11539`, i.e. 421 commits behind v0.8.0. The patch is the
+result of a real 3-way port onto v0.8.0 (24 files, ~1366 conflict lines). The
+places where v0.8.0's own rework collided, and how they were resolved:
+
+- `llama_memory_params` keeps `no_alloc`, but the caches *also* receive it as a
+  ctor argument and `llama_memory_bufs` owns contexts+buffers now. Streamed and
+  leased caches adopt their externally created buffer into `ctxs_bufs.bufs`,
+  and `llama_memory_bufs` gained `size()`/`front()`/`swap()` for that path.
+- `n_pad` is gone from `llama_kv_cache`; the streamed cache keeps its 256-row
+  alignment with `GGML_PAD(kv_size, 256)` in the stream branch only.
+- `kv-cache` causal-mask selection follows v0.8.0's `SWA_ONLY`/`DENSE_ONLY`
+  split (`mask_is_causal()`), which is also what the streamed mask bounds use.
+- `llama-context`: `sched_new()` carries v0.8.0's copy/realloc callback
+  registration; arena preparation (`prepare_compute_arenas`) layers on top and
+  `--fit` simulation keeps routing through `model.no_alloc()`.
+- Two hidden-state channels coexist and both are live: v0.8.0's per-token
+  `embd_state` (set via `llama_batch_ext_set_embd_state`, used by MTP-context
+  and Lilicorr batches) and the fork's borrowed `embd_h` buffer, which the MTP
+  draft hands over as a separate `hidden` pointer
+  (`llama_decode_mtp_embeddings` → `mtp_visual_hidden` → `llama_batch_allocr`).
+  `llama_batch_allocr` copies `embd_h` rows per ubatch into
+  `data_t::embd_h`, and `llm_graph_input_embd_h::set_input` prefers
+  `ubatch->embd_state` and falls back to `ubatch->embd_h`. Getting this wrong
+  is silent until the first image request: writing the borrowed buffer into the
+  (empty) state vector segfaults in `ubatch_add`, and reading the wrong channel
+  feeds the draft garbage.
+- `common_fit_apply()` is v0.8.0's rewrite verbatim; the fork's streamed-MTP /
+  DFlash validation helpers are appended and called before it.
+- `mtmd`: `dyn_size` keeps `get_target_size()` + the virtual `target_size()` +
+  the shared `resize()` helper, and the new LFM3-VL preprocessor ports onto
+  that pattern (the fork's Gemma 4 preprocessor keeps its own budget logic).
+- Tests: upstream's `test-llama-archs.cpp` wins; `tests/CMakeLists.txt` is the
+  fork's (the image builds with `LLAMA_BUILD_TESTS=OFF`, so fork test targets
+  are not compiled here).
+
+### v0.8.0 validation (2026-11-01)
+
+- CPU build of the merged tree: `llama-server` compiles, loads the abliterated
+  GGUF (`qwen35`, blk.64 MTP tensors detected) and generates through
+  `/v1/chat/completions`.
+- CUDA image, RTX 5090, sm_89 code (PTX JIT), production env (arena 2048,
+  `CTX_SIZE=131072`, q8_0/q4_0, MTP draft-2, Q8_0 mmproj):
+  - `KV stream bootstrap pool 7.31 MiB, shared budget 2048.00 MiB,
+    temporary device grants 215.58 MiB, authoritative host 3536.00 MiB`
+    (3328 MiB target history + 208 MiB MTP auxiliary layer)
+  - `memory_phase: phase=prefill compute=149 MiB kv_pool=1780 MiB
+    resident_pages=245 ring_slots=13`
+  - `vision arena enabled: deferred projector weights and bounded serial phase
+    grants`; an image request suspends KV, borrows the projector into the arena
+    and answers correctly
+  - `MTP speculative decoding active`; `mtp-bench.sh` (256 tokens, JIT'd sm_89
+    kernels on sm_120, so the absolute rate is not the 4060 Ti rate):
+    97 t/s decode, 632 prompt t/s, 77-85% draft acceptance.
+- The 4060 Ti numbers still have to be re-measured on the NAS.
+
+Rebuild/regenerate the patch from a merge of
+`v0.8.0` + `feature/adaptive-kv-stream-v2` and diff against the tag commit
+(`git diff 8642541b HEAD`), never against a fork branch tip.
+
+### KV-stream V2 hard rules + 4060 Ti qualification
+
+The rules below were established on b11559 and are unchanged by the v0.8.0
+port: the hard-rule code paths (`llama_kv_cache` ctor guards, `common_*`
+config errors, `server_vision_arena_*`) were ported verbatim, and the model
+geometry that drives the numbers (`qwen35`, 64+1 blocks, 16 full-attention KV
+layers, 4 KV heads x 256 head_dim) is identical across the Qwen3.8-27B GGUFs.
 
 Hard startup rules enforced by the patch — violations exit at model-load
 time, before any weights load:
@@ -86,10 +163,14 @@ time, before any weights load:
   `MMPROJ_PATH` and the arena set, any other cache types are rejected
   (`vision arena is currently qualified with -fa on, Q8_0 K and Q4_0 V`).
   Text-only arena (no mmproj) is not gated.
-- Attached MTP inherits the target's KV types: set `CTKD`/`CTVD` equal to
-  `CTK`/`CTV` (the `auto` default resolves to q8_0, which mismatches a
-  q4_0 V and gets rejected). Draft lengths 1–3; keep
-  `SPEC_DRAFT_N_MAX` in that range.
+- Attached MTP inherits the target's KV types. As of the v0.8.0 port the fork
+  rejects explicit draft overrides outright when streaming is active
+  (`adaptive KV speculation inherits target cache types; remove draft KV
+  overrides`), so the entrypoint drops `--spec-draft-type-k/-v` whenever the
+  arena is on — passing `CTKD`/`CTVD` there aborts the MTP launch and the
+  probe falls back to plain decode. They still apply when
+  `KV_STREAM_ARENA_MIB=0`. Draft lengths 1–3; keep `SPEC_DRAFT_N_MAX` in that
+  range.
 - `MMPROJ_OFFLOAD=1` — CPU projector offload is rejected on
   vision+arena builds.
 
@@ -141,8 +222,8 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 
 | Var | Default | Purpose |
 |---|---|---|
-| `MODEL_PATH` | `/models/qwen36-dau/...IQ2_M.gguf` | GGUF weights |
-| `MMPROJ_PATH` | `/models/qwen36-dau/mmproj-BF16.gguf` | Vision projector (empty disables vision) |
+| `MODEL_PATH` | `/models/qwen38-27b-hui/Huihui-Qwen3.8-27B-abliterated-GSQ-RCO-IQ3_XXS-mtp.gguf` | GGUF weights |
+| `MMPROJ_PATH` | `/models/mmproj-Qwen3.8-27B-Q8_0.gguf` | Vision projector (empty disables vision). Q8_0 rather than BF16: Ada has no native BF16 tensor cores, and the abliterated GGUF keeps the base model's vision tower |
 | `MMPROJ_OFFLOAD` | `auto` | mmproj GPU offload (`auto` = llama.cpp decides, `on` = force GPU, `off` = keep on CPU) |
 | `ALIAS` | `qwable-dau` | Model alias shown in the UI |
 | `TRY_MTP` | `1` | Try MTP speculative decoding, fall back if unsupported |
@@ -157,8 +238,8 @@ docker push docker.io/binarybrian/llama-cpp:4060ti
 | `UBATCH_SIZE` | unset | Physical batch size (`-ub`). Unset keeps the llama-server default (512) |
 | `CTK` | `auto` (→ q8_0) | KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
 | `CTV` | `auto` (→ q8_0) | KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
-| `CTKD` | `auto` (→ q8_0) | MTP draft KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
-| `CTVD` | `auto` (→ q8_0) | MTP draft KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1) |
+| `CTKD` | `auto` (→ q8_0) | MTP draft KV cache type for K (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1). Ignored when the KV-stream arena is active — the draft then inherits `CTK` |
+| `CTVD` | `auto` (→ q8_0) | MTP draft KV cache type for V (auto/f32/f16/bf16/q8_0/q4_0/q4_1/iq4_nl/q5_0/q5_1). Ignored when the KV-stream arena is active — the draft then inherits `CTV` |
 | `TOOLS` | `all` | Built-in tools to enable (empty to disable; redundant when AGENT=1) |
 | `AGENT` | `1` | Enable CORS proxy + all built-in tools (`--agent`). Trusted LANs only. |
 | `CORS_ORIGINS` | `*` | CORS origins (`*` for all, or comma-separated URLs). Needed when AGENT=1 for LAN access. |
@@ -198,8 +279,7 @@ to q4_0 (draft quality matters less since rejected drafts are discarded).
 > **On `--kv-stream` builds this block mostly doesn't apply.** KV no
 > longer consumes VRAM (the arena budget is fixed; growing `CTX_SIZE`
 > grows pinned *host* RAM instead), and two knobs above become invalid:
-> `CTKD`/`CTVD` must match `CTK`/`CTV` (attached MTP inherits the
-> target's types), and `MMPROJ_OFFLOAD` must stay `1` on vision+arena
+> `CTKD`/`CTVD` are dropped (attached MTP inherits the target's types), and `MMPROJ_OFFLOAD` must stay `1` on vision+arena
 > builds. If the arena itself won't admit at startup, raise
 > `KV_STREAM_ARENA_MIB` or shrink `UBATCH_SIZE` — not `CTX_SIZE`.
 
