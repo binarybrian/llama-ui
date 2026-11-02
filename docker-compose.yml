@@ -31,11 +31,10 @@ services:
       # Only consulted in CTX_SIZE=auto mode; inert here (the arena forces --fit off)
       - FIT_TARGET=1024
       - CTX_SIZE=131072
-      # arena qualification: q8_0 K / q4_0 V, and the MTP draft inherits them
+      # arena qualification: q8_0 K / q4_0 V. The MTP draft inherits them, so
+      # CTKD/CTVD are left unset (they only apply with KV_STREAM_ARENA_MIB=0)
       - CTK=q8_0
       - CTV=q4_0
-      - CTKD=q8_0
-      - CTVD=q4_0
       - AGENT=1
       - CORS_ORIGINS=*
       - LOG_VERBOSITY=4
