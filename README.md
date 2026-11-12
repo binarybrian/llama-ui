@@ -125,6 +125,15 @@ DSpark batch rows, changed MTP/speculative state — were merged as follows:
   main CUDA port bug found by the sm_89 compile.
 - `delta-net-base` keeps the fork's staged/spill recurrent publication loop
   (v0.9.0's `set_rows` path is replaced by the spill-aware version).
+- `kv-cache` rotation: v0.9.0 keeps one Hadamard rotation matrix per layer as
+  constant weights, allocated on the KV buffer's type. The streaming cache's
+  host KV is an `Execution_Host` wrapper whose `alloc_buffer` intentionally
+  returns `nullptr`, so the 4.25 MiB rotation buffer could not be created and
+  model load aborted (`failed to allocate buffer for rotation matrices`).
+  Rotation matrices now go to the device that owns the storage, and the
+  host-backed MTP cache uses the streaming backend's device so the draft
+  graph does not fall back to CPU hadamard. (v0.8.0 fed rotation to the graph
+  as an input tensor, which is why the old image never hit this.)
 - `common_fit_apply()` is v0.9.0's rewrite; the fork's streamed-MTP / DFlash
   validation helpers are appended and called before it.
 - `mtmd`: v0.9.0's LFM3-VL preprocessor and the fork's Gemma 4 preprocessor
@@ -147,8 +156,14 @@ DSpark batch rows, changed MTP/speculative state — were merged as follows:
   CUDA.
 - CUDA sm_89 image built from `v0.9.0` + the V2 patch and pushed:
   binary `0.9.0-dev (build 12110, commit v0.9.0+kvstream)`,
-  digest `sha256:5faec8d9f1bc5791fbbb6c6f57c84c5ba1fff6df39bf83d109d6ae9d5b566f06`.
-  `--kv-stream-arena-mib` and the MTP flags are present in the image binary.
+  `--kv-stream-arena-mib` and the MTP flags present in the image binary.
+  Current digest: `sha256:9c0001634004816a96dbf45fc518c00f83746d37eefb2d35b9f07c2473b00022`
+  (image `sha256:b532f3bfe418513c9a69c450260da61661015737ba12b4d26fd68c192bbcf659`).
+- First 4060 Ti deploy (05:54 UTC 2026-11-12) aborted during context creation:
+  `failed to allocate Execution_Host buffer of size 4456448` →
+  `failed to allocate buffer for rotation matrices`. The image was rebuilt
+  with the rotation placement fix described above; this digest supersedes the
+  broken one.
 - The RTX 4060 Ti runtime numbers are still to be measured after the NAS
   app is restarted; use `mtp-bench.sh` and one WebUI image request.
 

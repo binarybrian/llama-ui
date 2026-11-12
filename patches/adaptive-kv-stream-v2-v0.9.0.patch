@@ -18002,10 +18002,10 @@ index 65aba2af7..abc35191d 100644
      ~llama_kv_cache_iswa() = default;
  
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index 06e218ba6..0a6b0aca5 100644
+index 06e218ba6..7c4768437 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
-@@ -4,6 +4,14 @@
+@@ -4,6 +4,15 @@
  #include "llama-io.h"
  #include "llama-model.h"
  #include "llama-context.h"
@@ -18016,11 +18016,12 @@ index 06e218ba6..0a6b0aca5 100644
 +#include "llama-memory-bounded-kv.h"
 +#include "llama-context-memory.h"
 +#include "ggml-alloc.h"
++#include "../ggml/src/ggml-backend-execution.h"
 +#include "../ggml/src/ggml-kv-stream-device.h"
  
  #include <algorithm>
  #include <cassert>
-@@ -18,6 +26,224 @@ static bool ggml_is_power_of_2(int n) {
+@@ -18,6 +27,224 @@ static bool ggml_is_power_of_2(int n) {
      return (n & (n - 1)) == 0;
  }
  
@@ -18245,7 +18246,7 @@ index 06e218ba6..0a6b0aca5 100644
  // orthonormal Walsh-Hadamard rotation matrix
  // note: res^2 == I
  static void ggml_gen_hadamard(ggml_tensor * tensor) {
-@@ -79,7 +305,8 @@ llama_kv_cache::llama_kv_cache(
+@@ -79,7 +306,8 @@ llama_kv_cache::llama_kv_cache(
      const layer_filter_cb & filter,
      const  layer_reuse_cb & reuse,
      const  layer_share_cb & share,
@@ -18255,7 +18256,7 @@ index 06e218ba6..0a6b0aca5 100644
      model(model), hparams(hparams), v_trans(v_trans),
      n_seq_max(n_seq_max), n_stream(unified ? 1 : n_seq_max), n_swa(n_swa),
      attn_rot_bufs(no_alloc), swa_type(swa_type), ctxs_bufs(no_alloc),
-@@ -98,6 +325,44 @@ llama_kv_cache::llama_kv_cache(
+@@ -98,6 +326,44 @@ llama_kv_cache::llama_kv_cache(
          }
      }
  
@@ -18300,7 +18301,7 @@ index 06e218ba6..0a6b0aca5 100644
      const uint32_t n_layer = hparams.n_layer_all;
  
      // define a comparator for the buft -> ctx map to ensure that the order is well-defined:
-@@ -161,6 +426,57 @@ llama_kv_cache::llama_kv_cache(
+@@ -161,6 +427,57 @@ llama_kv_cache::llama_kv_cache(
  
      const bool is_mla = hparams.is_mla();
  
@@ -18358,7 +18359,7 @@ index 06e218ba6..0a6b0aca5 100644
      for (uint32_t il = 0; il < n_layer; il++) {
          if (!hparams.has_kv(il)) {
              LLAMA_LOG_DEBUG("%s: layer %3d: does not have KV cache\n", __func__, il);
-@@ -176,7 +492,16 @@ llama_kv_cache::llama_kv_cache(
+@@ -176,7 +493,16 @@ llama_kv_cache::llama_kv_cache(
              const int32_t il_share = share(il);
  
              if (il_share >= 0) {
@@ -18376,7 +18377,7 @@ index 06e218ba6..0a6b0aca5 100644
  
                  LLAMA_LOG_WARN("%s: layer %3d: sharing with layer %d. k = %p, v = %p\n", __func__, il, il_share,
                          layer_share.k->data, layer_share.v->data);
-@@ -218,6 +543,17 @@ llama_kv_cache::llama_kv_cache(
+@@ -218,6 +544,17 @@ llama_kv_cache::llama_kv_cache(
  
              dev_name = ggml_backend_dev_name(dev);
          }
@@ -18394,7 +18395,7 @@ index 06e218ba6..0a6b0aca5 100644
  
          LLAMA_LOG_DEBUG("%s: layer %3d: dev = %s\n", __func__, il, dev_name);
  
-@@ -231,6 +567,16 @@ llama_kv_cache::llama_kv_cache(
+@@ -231,6 +568,16 @@ llama_kv_cache::llama_kv_cache(
  
          ggml_tensor * k = has_k ? ggml_new_tensor_3d(ctx, type_k, n_embd_k_gqa, kv_size, n_stream) : nullptr;
          ggml_tensor * v = has_v ? ggml_new_tensor_3d(ctx, type_v, n_embd_v_gqa, kv_size, n_stream) : nullptr;
@@ -18411,7 +18412,7 @@ index 06e218ba6..0a6b0aca5 100644
  
          has_k && ggml_format_name(k, "cache_%sk_l%d", name_tag, il);
          has_v && ggml_format_name(v, "cache_%sv_l%d", name_tag, il);
-@@ -274,9 +620,48 @@ llama_kv_cache::llama_kv_cache(
+@@ -274,9 +621,48 @@ llama_kv_cache::llama_kv_cache(
  
      // allocate the tensors and initialize the buffers to avoid NaNs in the padding
      for (auto & [buft, ctx] : ctx_map) {
@@ -18461,7 +18462,47 @@ index 06e218ba6..0a6b0aca5 100644
      }
  
      {
-@@ -423,20 +808,76 @@ void llama_kv_cache::init_rotation(const char * name_tag) {
+@@ -369,13 +755,14 @@ llama_kv_cache::llama_kv_cache(
+         }
+     }
+ 
+-    init_rotation(name_tag);
++    init_rotation(name_tag, mtp_host && stream && stream->kv_stream_backend
++            ? ggml_backend_get_device(stream->kv_stream_backend) : nullptr);
+ 
+     const char * LLAMA_KV_CACHE_DEBUG = getenv("LLAMA_KV_CACHE_DEBUG");
+     debug = LLAMA_KV_CACHE_DEBUG ? atoi(LLAMA_KV_CACHE_DEBUG) : 0;
+ }
+ 
+-void llama_kv_cache::init_rotation(const char * name_tag) {
++void llama_kv_cache::init_rotation(const char * name_tag, ggml_backend_dev_t device) {
+     if (!(n_rot_k || n_rot_v) || layers.empty()) {
+         return;
+     }
+@@ -389,7 +776,21 @@ void llama_kv_cache::init_rotation(const char * name_tag) {
+                 continue;
+             }
+ 
+-            const auto buft = ggml_backend_buffer_get_type(cache->buffer);
++            auto buft = ggml_backend_buffer_get_type(cache->buffer);
++            // Streamed host KV lives in a managed execution wrapper, which cannot allocate
++            // buffers of its own. The rotation matrices are constant weights for the compute
++            // graph, so place them on the device that owns the storage (and, for the
++            // host-backed MTP cache, on the device that runs the draft graph).
++            if (ggml_backend_buft_is_execution(buft)) {
++                if (auto * dev_buft = ggml_backend_dev_buffer_type(ggml_backend_buft_get_device(buft))) {
++                    buft = dev_buft;
++                }
++            } else if (device) {
++                if (auto * dev_buft = ggml_backend_dev_buffer_type(device)) {
++                    buft = dev_buft;
++                }
++            }
++
+             auto & ctx = ctx_map[buft];
+             if (!ctx) {
+                 ggml_init_params params = { 2*layers.size()*ggml_tensor_overhead(), nullptr, true };
+@@ -423,20 +824,76 @@ void llama_kv_cache::init_rotation(const char * name_tag) {
      }
  }
  
@@ -18539,7 +18580,7 @@ index 06e218ba6..0a6b0aca5 100644
      // TODO: refactor [TAG_KV_CACHE_SHARE_CELLS]
      if (other) {
          return true;
-@@ -452,6 +893,12 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+@@ -452,6 +909,12 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
      if (p1 < 0) {
          p1 = std::numeric_limits<llama_pos>::max();
      }
@@ -18552,7 +18593,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      if (seq_id >= 0) {
          auto & cells = v_cells[seq_to_stream[seq_id]];
-@@ -740,12 +1187,20 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
+@@ -740,12 +1203,20 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
  }
  
  std::map<ggml_backend_buffer_type_t, size_t> llama_kv_cache::memory_breakdown() const {
@@ -18576,7 +18617,7 @@ index 06e218ba6..0a6b0aca5 100644
      return ret;
  }
  
-@@ -790,6 +1245,7 @@ llama_memory_context_ptr llama_kv_cache::init_full() {
+@@ -790,6 +1261,7 @@ llama_memory_context_ptr llama_kv_cache::init_full() {
  
  llama_memory_context_ptr llama_kv_cache::init_update(llama_context * lctx, bool optimize) {
      GGML_UNUSED(optimize);
@@ -18584,7 +18625,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      bool do_shift = get_has_shift();
  
-@@ -798,6 +1254,7 @@ llama_memory_context_ptr llama_kv_cache::init_update(llama_context * lctx, bool
+@@ -798,6 +1270,7 @@ llama_memory_context_ptr llama_kv_cache::init_update(llama_context * lctx, bool
  
  llama_kv_cache::slot_info_vec_t llama_kv_cache::prepare(const std::vector<llama_ubatch> & ubatches) {
      llama_kv_cache::slot_info_vec_t res;
@@ -18592,7 +18633,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      struct state_t {
          slot_info sinfo; // slot info for the ubatch
-@@ -1237,6 +1694,7 @@ void llama_kv_cache::apply_ubatch(const slot_info & sinfo, const llama_ubatch &
+@@ -1237,6 +1710,7 @@ void llama_kv_cache::apply_ubatch(const slot_info & sinfo, const llama_ubatch &
  }
  
  bool llama_kv_cache::get_can_shift() const {
@@ -18600,7 +18641,7 @@ index 06e218ba6..0a6b0aca5 100644
      // Step35 uses per-layer RoPE dims; K-shift assumes a single global n_rot.
      if (model.arch == LLM_ARCH_STEP35) {
          return false;
-@@ -1247,6 +1705,53 @@ bool llama_kv_cache::get_can_shift() const {
+@@ -1247,6 +1721,53 @@ bool llama_kv_cache::get_can_shift() const {
      return true;
  }
  
@@ -18654,7 +18695,7 @@ index 06e218ba6..0a6b0aca5 100644
  uint32_t llama_kv_cache::get_size() const {
      const auto & cells = v_cells[seq_to_stream[0]];
  
-@@ -1296,6 +1801,12 @@ ggml_tensor * llama_kv_cache::get_k_storage(int32_t il) const {
+@@ -1296,6 +1817,12 @@ ggml_tensor * llama_kv_cache::get_k_storage(int32_t il) const {
      return layers[ikv].k;
  }
  
@@ -18667,7 +18708,7 @@ index 06e218ba6..0a6b0aca5 100644
  const llama_kv_cells & llama_kv_cache::get_cells(llama_seq_id seq_id) const {
      GGML_ASSERT(seq_id >= 0 && (size_t) seq_id < seq_to_stream.size());
  
-@@ -1420,7 +1931,7 @@ uint32_t llama_kv_cache::get_n_kv_rows(const llama_ubatch & ubatch) const {
+@@ -1420,7 +1947,7 @@ uint32_t llama_kv_cache::get_n_kv_rows(const llama_ubatch & ubatch) const {
  ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const {
      const int32_t ikv = map_layer_ids.at(il);
  
@@ -18676,7 +18717,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      const uint64_t kv_size      = get_size();
      const uint64_t n_embd_k_gqa = k->ne[0];
-@@ -1440,7 +1951,7 @@ ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_k
+@@ -1440,7 +1967,7 @@ ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_k
  ggml_tensor * llama_kv_cache::get_v(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const {
      const int32_t ikv = map_layer_ids.at(il);
  
@@ -18685,7 +18726,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      const uint64_t kv_size      = get_size();
      const uint64_t n_embd_v_gqa = v->ne[0];
-@@ -1470,11 +1981,12 @@ ggml_tensor * llama_kv_cache::get_v(ggml_context * ctx, int32_t il, uint32_t n_k
+@@ -1470,11 +1997,12 @@ ggml_tensor * llama_kv_cache::get_v(ggml_context * ctx, int32_t il, uint32_t n_k
  }
  
  ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il, const slot_info & sinfo) const {
@@ -18699,7 +18740,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      const int64_t n_embd_head = k_cur->ne[0];
      const int64_t n_head      = k_cur->ne[1];
-@@ -1505,11 +2017,12 @@ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggm
+@@ -1505,11 +2033,12 @@ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggm
  }
  
  ggml_tensor * llama_kv_cache::cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggml_tensor * v_idxs, int32_t il, const slot_info & sinfo) const {
@@ -18713,7 +18754,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      const int64_t n_embd_head = v_cur->ne[0];
      const int64_t n_head      = v_cur->ne[1];
-@@ -1939,8 +2452,6 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
+@@ -1939,8 +2468,6 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
              causal_attn = swa_type != LLAMA_SWA_TYPE_NONE;
          }
  
@@ -18722,7 +18763,7 @@ index 06e218ba6..0a6b0aca5 100644
          const args_set_input_attn_mask args = {
              /*.hparams          =*/ hparams,
              /*.ubatch           =*/ ubatch,
-@@ -1960,13 +2471,28 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
+@@ -1960,11 +2487,26 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
          } else {
              set_input_attn_mask_impl<float>(args, (float *) dst->data, causal_attn);
          }
@@ -18735,26 +18776,24 @@ index 06e218ba6..0a6b0aca5 100644
 +bool llama_kv_cache::mask_is_causal(bool causal_attn) const {
 +    if (causal_attn) {
 +        return true;
-+    }
+     }
 +    // see llama_non_causal_type: only the SWA (or only the dense) layers may be non-causal
 +    switch (hparams.non_causal_type) {
 +        case LLAMA_NON_CAUSAL_TYPE_SWA_ONLY:   return swa_type == LLAMA_SWA_TYPE_NONE;
 +        case LLAMA_NON_CAUSAL_TYPE_DENSE_ONLY: return swa_type != LLAMA_SWA_TYPE_NONE;
 +        default:                               return false;
-     }
- }
- 
++    }
++}
++
 +void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * ubatch, bool causal_attn) const {
 +    llm_attn_mask attn_mask;
 +    attn_mask.raw = dst;
 +    attn_mask.n_kv = (uint32_t) dst->ne[0];
 +    set_input_attn_mask(attn_mask, ubatch, causal_attn);
-+}
-+
- void llama_kv_cache::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {
-     const int64_t n_tokens = ubatch->n_tokens;
+ }
  
-@@ -2331,6 +2857,9 @@ const slot_info_vec_t *   sinfos_in) {
+ void llama_kv_cache::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {
+@@ -2331,6 +2873,9 @@ const slot_info_vec_t *   sinfos_in) {
              if (sinfos_in && !(*sinfos_in)[s].empty()) {
                  throw std::runtime_error("failed to restore kv cache: mirrored cache holds cells this one does not");
              }
@@ -18764,7 +18803,7 @@ index 06e218ba6..0a6b0aca5 100644
              continue;
          }
  
-@@ -2343,6 +2872,74 @@ const slot_info_vec_t *   sinfos_in) {
+@@ -2343,6 +2888,74 @@ const slot_info_vec_t *   sinfos_in) {
  
          try {
              res = res && state_read_data(io, strm, cell_count, sinfo);
@@ -18839,7 +18878,7 @@ index 06e218ba6..0a6b0aca5 100644
          } catch (...) {
              res = false;
          }
-@@ -2495,6 +3092,7 @@ void llama_kv_cache::state_write_data(llama_io_write_i & io, const cell_ranges_t
+@@ -2495,6 +3108,7 @@ void llama_kv_cache::state_write_data(llama_io_write_i & io, const cell_ranges_t
  bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32_t cell_count, slot_info & sinfo, llama_seq_id dest_seq_id, const slot_info * sinfo_in) {
      auto & cells = v_cells[strm];
      auto & head  = v_heads[strm];
@@ -18847,7 +18886,7 @@ index 06e218ba6..0a6b0aca5 100644
  
      if (dest_seq_id != -1) {
          // single sequence
-@@ -2524,7 +3122,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
+@@ -2524,7 +3138,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
              io.read(&pos,      sizeof(pos));
              io.read(&n_seq_id, sizeof(n_seq_id));
  
@@ -18856,7 +18895,7 @@ index 06e218ba6..0a6b0aca5 100644
                  LLAMA_LOG_ERROR("%s: invalid seq_id-agnostic kv cell\n", __func__);
                  return false;
              }
-@@ -2633,6 +3231,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
+@@ -2633,6 +3247,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
              io.read(&pos,      sizeof(pos));
              io.read(&n_seq_id, sizeof(n_seq_id));
  
@@ -18864,7 +18903,7 @@ index 06e218ba6..0a6b0aca5 100644
              cells.pos_set(i, pos);
  
              if (has_cell_ext()) {
-@@ -3035,6 +3634,61 @@ uint32_t llama_kv_cache_context::get_n_kv_rows() const {
+@@ -3035,6 +3650,61 @@ uint32_t llama_kv_cache_context::get_n_kv_rows() const {
      return n_kv_rows;
  }
  
@@ -18926,7 +18965,7 @@ index 06e218ba6..0a6b0aca5 100644
  ggml_type llama_kv_cache_context::type_k() const {
      return kv->type_k();
  }
-@@ -3088,7 +3742,21 @@ void llama_kv_cache_context::set_input_v_idxs(ggml_tensor * dst, const llama_uba
+@@ -3088,7 +3758,21 @@ void llama_kv_cache_context::set_input_v_idxs(ggml_tensor * dst, const llama_uba
  }
  
  void llama_kv_cache_context::set_input_attn_mask(const llm_attn_mask & attn_mask, const llama_ubatch * ubatch, bool causal_attn) const {
@@ -18950,7 +18989,7 @@ index 06e218ba6..0a6b0aca5 100644
  
  void llama_kv_cache_context::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {
 diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
-index 9ed36c562..d33076b99 100644
+index 9ed36c562..d94bb0210 100644
 --- a/src/llama-kv-cache.h
 +++ b/src/llama-kv-cache.h
 @@ -4,6 +4,7 @@
@@ -19066,6 +19105,15 @@ index 9ed36c562..d33076b99 100644
      bool v_trans = true;  // the value tensor is transposed
  
      const uint32_t n_seq_max = 1;
+@@ -298,7 +360,7 @@ private:
+     // keep constants separate from mutable KV buffers
+     llama_memory_bufs attn_rot_bufs;
+ 
+-    void init_rotation(const char * name_tag);
++    void init_rotation(const char * name_tag, ggml_backend_dev_t device);
+ 
+     // env: LLAMA_KV_CACHE_DEBUG
+     int debug = 0;
 @@ -308,6 +370,9 @@ private:
  
      // ggml contexts for the KV cache along with the allocated backend buffers:
