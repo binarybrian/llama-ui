@@ -6,7 +6,7 @@
 # Host: 192.168.2.1   Port: 30084 (WebUI + OpenAI-compatible API)
 #
 # Image is published to Docker Hub (anonymous pull), built from llama.cpp
-# v0.8.0 (b11960) + the adaptive KV streaming V2 patch. The model files are
+# v0.9.0 (b12110) + the adaptive KV streaming V2 patch. The model files are
 # bind-mounted read-only from the vega pool — keep them on SSD for fast load.
 services:
   llama-ui:
@@ -19,10 +19,10 @@ services:
       # /mnt/vega/models on TrueNAS -> /models inside the container (read-only)
       - /mnt/vega/models:/models:ro
     environment:
-      # Huihui Qwen3.8-27B abliterated, GSQ-RCO IQ3_XXS mixed + MTP head
-      # (9.73 GiB, nextn_predict_layers = 1; same geometry as the qualified
-      # Qwen3.8-27B-GSQ-RCO-IQ3_XXS-mtp)
-      - MODEL_PATH=/models/qwen38-27b-hui/Huihui-Qwen3.8-27B-abliterated-GSQ-RCO-IQ3_XXS-mtp.gguf
+      # Unsloth Dynamic V3.1 Qwen3.8-27B, UD-IQ3_XXS
+      # (10.93 GB / 10.18 GiB, ~3.2 bpw, MTP head embedded:
+      # nextn_predict_layers = 1, blk.64.nextn.*; 64 + 1 blocks).
+      - MODEL_PATH=/models/qwen38-27b-unsloth/Qwen3.8-27B-UD-IQ3_XXS.gguf
       - MMPROJ_PATH=/models/mmproj-Qwen3.8-27B-Q8_0.gguf
       - MMPROJ_OFFLOAD=1
       - ALIAS=qwen3.8-27b

@@ -14,15 +14,16 @@ for arg in "$@"; do
     --help|-h)
       echo "Usage: ./build.sh [VERSION] [--local] [--kv-stream]"
       echo ""
-      echo "  VERSION    llama.cpp release tag: a semver release (e.g. v0.8.0) or a"
-      echo "             rolling build tag (e.g. b11960). Defaults to the latest"
+      echo "  VERSION    llama.cpp release tag: a semver release (e.g. v0.9.0) or a"
+      echo "             rolling build tag (e.g. b12110). Defaults to the latest"
       echo "             release including pre-releases (the bNNNN series)."
       echo "  --local    Build locally only (no push to Docker Hub)"
       echo "  --kv-stream  Apply the adaptive KV streaming V2 (shared device arena)"
       echo "               patch from RaymondHuang210129/llama.cpp-adaptive-kv-streaming,"
       echo "               branch feature/adaptive-kv-stream-v2. The patch file is"
-      echo "               chosen by tag: v0.8.0 / b11960 ->"
-      echo "               adaptive-kv-stream-v2-v0.8.0.patch, b11559 ->"
+      echo "               chosen by tag: v0.9.0 / b12110 ->"
+      echo "               adaptive-kv-stream-v2-v0.9.0.patch; v0.8.0 / b11960 ->"
+      echo "               adaptive-kv-stream-v2-v0.8.0.patch; b11559 ->"
       echo "               adaptive-kv-stream-v2-b11559.patch (other tags: error)."
       echo "               Adds --kv-stream-arena-mib (preferred) and legacy"
       echo "               --kv-stream-pool-mib; requires -fa on + --fit off."
@@ -32,6 +33,7 @@ for arg in "$@"; do
       echo ""
       echo "Examples:"
       echo "  ./build.sh                              # Latest release, build + push"
+      echo "  ./build.sh v0.9.0 --kv-stream --local   # v0.9.0 (b12110) + V2 patch, local"
       echo "  ./build.sh v0.8.0 --kv-stream --local   # v0.8.0 (b11960) + V2 patch, local"
       echo "  ./build.sh b11559 --kv-stream           # previous base, build + push"
       echo "  CUDA_ARCH=86-real ./build.sh            # Override CUDA arch"
@@ -73,10 +75,11 @@ CUDA_ARCH="${CUDA_ARCH:-89-real;89}"
 KVSTREAM_ARGS=(--build-arg KV_STREAM="$KV_STREAM")
 if [[ $KV_STREAM -eq 1 ]]; then
   case "$LLAMA_TAG" in
+    v0.9.0|b12110) KV_STREAM_PATCH="adaptive-kv-stream-v2-v0.9.0.patch" ;;
     v0.8.0|b11960) KV_STREAM_PATCH="adaptive-kv-stream-v2-v0.8.0.patch" ;;
     b11559)        KV_STREAM_PATCH="adaptive-kv-stream-v2-b11559.patch" ;;
     *)
-      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: v0.8.0/b11960, b11559 — see patches/)" >&2
+      echo "ERROR: no kv-stream patch for $LLAMA_TAG (available bases: v0.9.0/b12110, v0.8.0/b11960, b11559 — see patches/)" >&2
       exit 1
       ;;
   esac
