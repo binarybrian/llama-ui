@@ -134,6 +134,16 @@ DSpark batch rows, changed MTP/speculative state — were merged as follows:
   host-backed MTP cache uses the streaming backend's device so the draft
   graph does not fall back to CPU hadamard. (v0.8.0 fed rotation to the graph
   as an input tensor, which is why the old image never hit this.)
+- `src[5]` collision: v0.9.0 stores the `kv_rows` cell list of a
+  flash-attention node in `src[5]`, and the streaming patch stores its compact
+  prefill mask bounds in the same slot. The managed streaming/shared-read
+  attention rejects `src[5]` rows, so with `--kv-unified` the `kv_rows` probe
+  found no backend and `sched_reserve` hit
+  `GGML_ASSERT(*cur_backend_id != -1)`. Streamed, shared-read and
+  streaming-parent contexts now disable `kv_rows` (they encode per-query
+  ranges in the mask instead, as v0.8.0 did), and the execution-owner check
+  only treats `src[5]` as compact bounds when `src[3]` is absent, so upstream
+  non-streamed rows still work.
 - `common_fit_apply()` is v0.9.0's rewrite; the fork's streamed-MTP / DFlash
   validation helpers are appended and called before it.
 - `mtmd`: v0.9.0's LFM3-VL preprocessor and the fork's Gemma 4 preprocessor
@@ -157,13 +167,21 @@ DSpark batch rows, changed MTP/speculative state — were merged as follows:
 - CUDA sm_89 image built from `v0.9.0` + the V2 patch and pushed:
   binary `0.9.0-dev (build 12110, commit v0.9.0+kvstream)`,
   `--kv-stream-arena-mib` and the MTP flags present in the image binary.
-  Current digest: `sha256:9c0001634004816a96dbf45fc518c00f83746d37eefb2d35b9f07c2473b00022`
-  (image `sha256:b532f3bfe418513c9a69c450260da61661015737ba12b4d26fd68c192bbcf659`).
+  Current digest: `sha256:4e72528de21877743f8846ea683d8232bf84c828801c1e8bed9542ffb563d7e4`
+  (image `sha256:5b399471cec1230adb763dec014832d2384d10c31d0dde6ed150cdbac3024a94`).
+  This image carries both port fixes above (rotation placement and the
+  `src[5]` `kv_rows` collision).
 - First 4060 Ti deploy (05:54 UTC 2026-11-12) aborted during context creation:
   `failed to allocate Execution_Host buffer of size 4456448` →
   `failed to allocate buffer for rotation matrices`. The image was rebuilt
   with the rotation placement fix described above; this digest supersedes the
   broken one.
+- Second 4060 Ti deploy (14:56 UTC, rotation disabled via env) got past the
+  rotation buffer and aborted in `sched_reserve` with
+  `GGML_ASSERT(*cur_backend_id != -1)` — the `src[5]` `kv_rows`/compact-mask
+  collision above. Both the probe and the streamed graph are now built with
+  `kv_rows` disabled for streaming contexts; `LLAMA_KV_ROWS_DISABLE=1`
+  exercises the same path on older images.
 - The RTX 4060 Ti runtime numbers are still to be measured after the NAS
   app is restarted; use `mtp-bench.sh` and one WebUI image request.
 
