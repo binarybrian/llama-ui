@@ -22,7 +22,7 @@ services:
       # Unsloth Dynamic V3.1 Qwen3.8-27B, UD-IQ3_XXS
       # (10.93 GB / 10.18 GiB, ~3.2 bpw, MTP head embedded:
       # nextn_predict_layers = 1, blk.64.nextn.*; 64 + 1 blocks).
-      - MODEL_PATH=/models/qwen38-27b-unsloth/Qwen3.8-27B-UD-IQ3_XXS.gguf
+      - MODEL_PATH=/models/qwen38-27b-unsloth-abl/Qwen3.8-27B-UD-IQ3_XXS-abliterated.gguf
       - MMPROJ_PATH=/models/mmproj-Qwen3.8-27B-Q8_0.gguf
       - MMPROJ_OFFLOAD=1
       - ALIAS=qwen3.8-27b

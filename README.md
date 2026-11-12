@@ -21,16 +21,35 @@ interface on port 8080.
 
 The image is model-agnostic — any GGUF model can be served by setting
 `MODEL_PATH` (and optionally `MMPROJ_PATH` for vision). The shipped
-`docker-compose.yml` serves Unsloth Dynamic V3.1
+`docker-compose.yml` serves the abliterated build
+`Qwen3.8-27B-UD-IQ3_XXS-abliterated.gguf` (see below) of Unsloth Dynamic V3.1
 `Qwen3.8-27B-UD-IQ3_XXS.gguf` (10.93 GB / 10.18 GiB, ~3.2 bpw; MTP head
 embedded, `nextn_predict_layers = 1`, `blk.64.nextn.*`) with the KV-stream
-arena. This is the base Qwen3.8-27B model from the Unsloth release, not the
-Huihui abliterated variant; swap models by changing the env vars — no rebuild
-needed. The existing Q8_0 projector is reused; if it is incompatible with the
-Unsloth model, use the Unsloth `mmproj-F16.gguf`.
+arena. Swap models by changing the env vars — no rebuild needed. The existing
+Q8_0 projector is reused; if it is incompatible with the Unsloth model, use
+the Unsloth `mmproj-F16.gguf`.
 
 For NVIDIA RTX 40-series (Ada Lovelace), use `mmproj-F16.gguf` (not BF16) —
 Ada has native F16 tensor cores but lacks native BF16 support.
+
+### Abliterated variant (optional)
+
+The served file can be an abliterated build of the same base. huihui-ai
+publishes an *abliteration patch* rather than a full model
+(`huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF`, `patch-unsloth/`,
+patch-unsloth 9, 27 weights) that is applied to the exact Unsloth GGUF with
+their `patch-unsloth-Qwen3.8-27B-dec.py` script. The deployment here uses
+layers 22–52 with `--ablate-experts 1`, which matches the ablation scope of
+the previously served GSQ-RCO release.
+
+- Output: `/models/qwen38-27b-unsloth-abl/Qwen3.8-27B-UD-IQ3_XXS-abliterated.gguf`,
+  byte-for-byte the same size as the base (10,934,860,704 B) and the same 866
+  tensors; only `ssm_out`/`attn_output`/`ffn_down` in layers 22–52 differ.
+  MTP (`blk.64.nextn.*`) and the vision tower are untouched.
+- Verified: all 62 target tensors equal `xor(patch, key)` bit-for-bit, the
+  other 804 are unchanged, and the file loads and generates.
+- Re-patching with a wider range (e.g. 17–52) only needs the same sparse
+  shards (shards 1–4, 1.5 GB on disk) and one script run.
 
 ## Quick start (TrueNAS)
 
