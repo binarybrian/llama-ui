@@ -182,8 +182,34 @@ DSpark batch rows, changed MTP/speculative state — were merged as follows:
   collision above. Both the probe and the streamed graph are now built with
   `kv_rows` disabled for streaming contexts; `LLAMA_KV_ROWS_DISABLE=1`
   exercises the same path on older images.
-- The RTX 4060 Ti runtime numbers are still to be measured after the NAS
-  app is restarted; use `mtp-bench.sh` and one WebUI image request.
+- Third 4060 Ti deploy (15:48 UTC 2026-11-12) is healthy on digest
+  `4e72528d...`, with the production env and no `LLAMA_ATTN_ROT_DISABLE` /
+  `LLAMA_KV_ROWS_DISABLE` overrides:
+  - `init_rotation: CUDA0 rotation buffer size = 4.25 MiB` (target) and
+    `CUDA0_KV_Host rotation buffer size = 0.27 MiB` (MTP cache)
+  - `KV streaming active, disabling kv_rows`
+  - arena: `shared budget 2048.00 MiB, temporary device grants 215.58 MiB,
+    authoritative host 3536.00 MiB` (3328 target + 208 MTP auxiliary),
+    `resident_pages=245 ring_slots=13` at boot, `293/14` at 22K tokens
+  - `adaptive MTP span attention active (first TG4, reserved=22190 tokens)`,
+    draft acceptance 0.83–0.89 at 22–27K (mean draft len 2.4–2.7), 0.71 at 36K
+    after an image
+  - prefill ~700–750 tok/s at 22K; decode 28.5 / 31.8 / 33.3 / 29.9 t/s at
+    22K / 22.7K / 26.8K / 31K, 24.6 t/s at 36K. These are interactive turns,
+    not `mtp-bench.sh` runs, so treat them as indicative.
+  - vision: the reused Q8_0 projector works with the Unsloth base model.
+    A 1472x1472 image: projector reload 2.69 s, encode 5.42 s (2 batches),
+    KV suspend 0.39 ms / resume 4.3 ms; the answer was correct.
+  - `KV_reload` on the prefill→decode transition at 35K: 934 MB in 70 ms
+    (~13 GB/s over PCIe), `calls=32`.
+- Image batches on this hybrid (SSM + attention) model log
+  `find_slot: non-consecutive token position ...` from the recurrent-state
+  path: M-RoPE image tokens do not use consecutive positions, and upstream's
+  handler is a warning with a TODO. Output is unaffected.
+- The MTP cache's rotation matrices currently land on the pinned host buffer
+  (`CUDA0_KV_Host`, 0.27 MiB) because the draft context carries no streaming
+  backend; it costs nothing measurable at 1 layer. Moving them to the device
+  is a possible micro-optimization.
 
 ### v0.8.0 validation (previous, 2026-11-01)
 
