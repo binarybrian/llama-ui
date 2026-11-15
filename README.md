@@ -74,14 +74,14 @@ Override the CUDA arch or llama.cpp tag via build args if needed:
 
 ```sh
 docker buildx build --build-arg CMAKE_CUDA_ARCHITECTURES=86-real \
-  --build-arg LLAMA_TAG=v0.9.0 --build-arg LLAMA_BUILD_NUMBER=12110 \
+  --build-arg LLAMA_TAG=v1.0.0 --build-arg LLAMA_BUILD_NUMBER=12359 \
   -t llama-cpp:local .
 ```
 
 ### Adaptive KV streaming V2 (shared device arena) variant
 
 ```sh
-./build.sh v0.9.0 --kv-stream --local
+./build.sh v1.0.0 --kv-stream --local
 ```
 
 Applies the adaptive KV streaming **V2** patch (derived from
@@ -90,7 +90,8 @@ branch `feature/adaptive-kv-stream-v2`) on top of the standard build. V2
 keeps the complete KV history in pinned host RAM and serves attention from
 a bounded, device-local arena of resident pages plus one shared ring; the
 same arena is phase-shared with compute workspaces (and the vision
-projector). The patch file is chosen by tag: `v0.9.0` / `b12110` →
+projector). The patch file is chosen by tag: `v1.0.0` / `b12359` →
+`patches/adaptive-kv-stream-v2-v1.0.0.patch`; `v0.9.0` / `b12110` →
 `patches/adaptive-kv-stream-v2-v0.9.0.patch`; `v0.8.0` / `b11960` →
 `patches/adaptive-kv-stream-v2-v0.8.0.patch`; `b11559` →
 `patches/adaptive-kv-stream-v2-b11559.patch` (kept for rollback); other tags
@@ -104,6 +105,53 @@ continues without it instead of failing startup; it also skips the arena
 in `CTX_SIZE=auto` mode, which runs `--fit on`. Note V2 renamed the old
 `--kv-stream-stage-mib` flag (V1 patches, removed) to
 `--kv-stream-pool-mib`.
+
+### Patch provenance (v1.0.0 / b12359)
+
+`patches/adaptive-kv-stream-v2-v1.0.0.patch` (4.5 MB, 257 files) is a 3-way
+replay of the *qualified* v0.9.0 merge tree (`git diff HEAD` of the working
+tree that produced the v0.9.0 patch, both port fixes included) onto upstream
+`v1.0.0` (`b1b770d`, b12359). It passes `git apply --check` on a pristine
+v1.0.0 clone; the CPU build compiles clean and a CPU smoke run boots with
+MTP (acceptance 14/15 draft tokens, fingerprint `b12359-b1b770d90`).
+Resolution notes for the 21 conflicting files:
+
+- The fork's **vision arena** modules (`mtmd-{workspace,session,embeddings,
+  projector-storage}`, `clip.cpp/clip.h` changes and their tests) are **not
+  ported**: v1.0.0's `mtmd` refactor (#31865) deleted the clip stack they sit
+  on. `server_uses_vision_arena()` is pinned false; vision uses the plain
+  `mtmd_batch_encode` / `mtmd_init_from_file` paths. KV streaming itself is
+  unaffected (it never depended on the arena).
+- CUDA: `node_src_types` was added to v1.0.0's relocated `ggml_cuda_graph`
+  (`graph.cuh`); `fattn-vec.cuh`'s `Q_q8_1` guard unions both v1.0.0's
+  `F8_E4M3` exclusion and the fork's `F32` exclusion (q8_0/q4_0 KV uses the
+  q8_1-Q path either way); `fattn-mma-f16.cuh` resolves fully to the fork's
+  resumable kernels.
+- v1.0.0 absorbed several fork features upstream: the NextN/layer-input
+  staging API moved into `llama.h`, MTP recurrent-state rollback splits are
+  upstream's `build_conv_state_store` (`n_rs_seq`), and the scheduler reuses
+  `sched_params`; `llama-ext.h` now only carries `llama_decode_mtp_embeddings`.
+- `ggml_flash_attn_ext_set_prec()` was pruned from ggml 1.0 (FA precision
+  moved to `llama_prec_policy`); all fork probe/builder call sites were
+  dropped — the raw probe op defaults to `GGML_PREC_F32` (zeroed op_params)
+  and the CUDA FA dispatch no longer reads precision from the op.
+- `llama_kv_cache`'s ctor now takes `(name_tag, stream, is_indexer)`; the
+  DSA indexer call site was adjusted to pass the stream slot explicitly.
+- `llama_set_warmup` and the fork's `set_warmup` are gone (API pruned
+  upstream); mtmd itself is byte-identical to upstream v1.0.0.
+
+Security opt-ins added to `entrypoint.sh` for v1.0.0: `--api-key` passthrough
+(`API_KEY`), `--allow-unauthenticated-tools` on by default (`ALLOW_UNAUTH_TOOLS=0`
+to opt out — v1.0.0 refuses to start `--agent`/tools on a non-loopback bind
+without a key otherwise), and `MEDIA_ALLOW_PRIVATE_URLS=1` to opt into
+`--media-allow-private-urls` for LAN-referenced media URLs.
+
+Pushed to `docker.io/binarybrian/llama-cpp:4060ti` as
+`sha256:f837ac08e4f8dff3aaa1b5119679f4f26d83cc35b1283f1da1d014d30002a9f7`
+(2026-11-14). **4060 Ti validation pending** — restart the TrueNAS app to
+pull it, then confirm the boot lines (rotation buffer, `KV streaming
+active, disabling kv_rows`, MTP active), re-run `./mtp-bench.sh` and one
+image request to qualify vision without arena grants.
 
 ### Patch provenance (v0.9.0 / b12110)
 
