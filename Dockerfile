@@ -7,6 +7,7 @@
 # cmake flag set mirrors the Gentoo ebuild sci-misc/llama-cpp-0_pre10636.ebuild.
 # Optional KV-stream (adaptive KV streaming V2, shared device arena) variant:
 # build arg KV_STREAM=1 applies patches/$KV_STREAM_PATCH (per-base:
+# v1.0.0/b12359 -> adaptive-kv-stream-v2-v1.0.0.patch,
 # v0.9.0/b12110 -> adaptive-kv-stream-v2-v0.9.0.patch,
 # v0.8.0/b11960 -> adaptive-kv-stream-v2-v0.8.0.patch,
 # b11559 -> adaptive-kv-stream-v2-b11559.patch; picked by build.sh).
@@ -16,9 +17,9 @@
 FROM node:22-bookworm-slim AS ui-builder
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-ARG LLAMA_TAG=v0.9.0
-# numeric build number (v0.9.0 -> 12110); the semver tag itself is not a number
-ARG LLAMA_BUILD_NUMBER=12110
+ARG LLAMA_TAG=v1.0.0
+# numeric build number (v1.0.0 -> 12359); the semver tag itself is not a number
+ARG LLAMA_BUILD_NUMBER=12359
 RUN git clone --depth 1 --branch "${LLAMA_TAG}" https://github.com/ggml-org/llama.cpp.git /src/llama.cpp
 WORKDIR /src/llama.cpp/tools/ui
 # Populates build.json (the UI's build-version display). CMake's own npm
@@ -43,11 +44,11 @@ RUN test -f dist/index.html && test -f dist/build.json && test -d dist/_app \
 
 # ---------- Stage 2: llama.cpp build (CUDA 12.8 devel) ------------------------
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS builder
-ARG LLAMA_TAG=v0.9.0
-ARG LLAMA_BUILD_NUMBER=12110
+ARG LLAMA_TAG=v1.0.0
+ARG LLAMA_BUILD_NUMBER=12359
 ARG CMAKE_CUDA_ARCHITECTURES=89-real;89
 ARG KV_STREAM=0
-ARG KV_STREAM_PATCH=adaptive-kv-stream-v2-v0.9.0.patch
+ARG KV_STREAM_PATCH=adaptive-kv-stream-v2-v1.0.0.patch
 ARG LLAMA_BUILD_SUFFIX=""
 
 ENV DEBIAN_FRONTEND=noninteractive

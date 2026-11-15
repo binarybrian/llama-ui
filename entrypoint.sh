@@ -191,6 +191,36 @@ if [[ -n "${TOOLS_VAL}" ]]; then
   base_args+=( --tools "${TOOLS_VAL}" )
 fi
 
+# Optional API key (LLAMA_API_KEY-style). Unset = unauthenticated server.
+if [[ -n "${API_KEY}" ]]; then
+  base_args+=( --api-key "${API_KEY}" )
+fi
+
+# v1.0.0 security gate: server tools / MCP (enabled by --agent or --tools)
+# refuse to start on a non-loopback bind with no API key unless explicitly
+# allowed. This deployment binds 0.0.0.0 on a trusted LAN with no API key, so
+# allow-unauthenticated-tools defaults ON; set ALLOW_UNAUTH_TOOLS=0 with
+# API_KEY=... to switch to key-based auth instead. Probed so older images
+# (v0.9.0 and earlier, which lack the flag and the gate) keep booting.
+ALLOW_UNAUTH_TOOLS="${ALLOW_UNAUTH_TOOLS:-1}"
+if [[ -z "${API_KEY}" && ( "${ALLOW_UNAUTH_TOOLS}" == "1" || "${ALLOW_UNAUTH_TOOLS}" == "on" ) ]]; then
+  if { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--allow-unauthenticated-tools"; then
+    base_args+=( --allow-unauthenticated-tools )
+  fi
+fi
+
+# Opt-in: allow http(s) media URLs (image_url etc.) that point at private /
+# loopback addresses. Off by default (v1.0.0 SSRF guard); most clients send
+# base64 images, which are unaffected.
+MEDIA_ALLOW_PRIVATE_URLS="${MEDIA_ALLOW_PRIVATE_URLS:-0}"
+if [[ "${MEDIA_ALLOW_PRIVATE_URLS}" == "1" || "${MEDIA_ALLOW_PRIVATE_URLS}" == "on" ]]; then
+  if { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--media-allow-private-urls"; then
+    base_args+=( --media-allow-private-urls )
+  else
+    echo "WARN: MEDIA_ALLOW_PRIVATE_URLS set, but this llama-server has no --media-allow-private-urls (pre-v1.0.0 image); continuing without it" >&2
+  fi
+fi
+
 # Adaptive KV streaming V2: shared device-local phase arena in MiB (bounded
 # budget shared between the streaming KV working set and compute workspaces).
 # Only exists in --kv-stream image builds; 0 (default) leaves the flag unset.
