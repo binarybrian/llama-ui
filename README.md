@@ -147,11 +147,43 @@ without a key otherwise), and `MEDIA_ALLOW_PRIVATE_URLS=1` to opt into
 `--media-allow-private-urls` for LAN-referenced media URLs.
 
 Pushed to `docker.io/binarybrian/llama-cpp:4060ti` as
-`sha256:f837ac08e4f8dff3aaa1b5119679f4f26d83cc35b1283f1da1d014d30002a9f7`
-(2026-11-14). **4060 Ti validation pending** — restart the TrueNAS app to
-pull it, then confirm the boot lines (rotation buffer, `KV streaming
-active, disabling kv_rows`, MTP active), re-run `./mtp-bench.sh` and one
-image request to qualify vision without arena grants.
+`sha256:121a2c9c035f6de104dcdb13eec5613299923ed9a70d936149affa6f686d8682`
+(2026-11-15).
+
+### v1.0.0 live validation (2026-11-15, RTX 4060 Ti)
+
+Deployed on TrueNAS and qualified end to end:
+
+- boots as `build 12359 (v1.0.0+kvstream)`, `KV streaming active, disabling
+  kv_rows`, 4.25 MiB rotation buffer on CUDA0, authoritative host KV 3536 MiB,
+  2048 MiB shared arena, `n_rs_seq = 2` (target) / `0` (draft)
+- `./mtp-bench.sh http://192.168.2.1:30084 1000 3`: **24–28 t/s decode**
+  (median 25), 80–92 % draft acceptance, 186–238 t/s prompt
+- vision without arena grants: a 1024-token image request answered correctly
+  (plain `mtmd_batch_encode` path), so dropping the fork's vision arena is
+  validated on hardware
+
+Two v1.0.0-specific bugs were fixed on the way (both in the patch):
+
+1. **arena under-measurement** — v1.0.0 moves per-request sampling into the
+   graph, so the boot-time measurement was undersized and every completion
+   failed with `borrowed buffer 1 requires ... range ends at ...` /
+   `Compute error`. The plan now carries `size/16 + 2 MiB` headroom and the
+   text-phase transition re-measures once before failing.
+2. **recurrent host-spill conv store** — upstream's
+   `build_conv_state_store` addresses `n_rs_seq+1` device slots while the
+   streamed recurrent cache keeps rollback snapshots on the host, aborting in
+   `ggml_view_4d`. delta-net now uses the fork's spill-aware store.
+
+**Known regression (open):** the recurrent **snapshot** draft rollback
+(`n_rs_seq = depth`) aborts on rejected drafts: the attention cache's
+`llama_kv_stream_model::truncate()` refuses because an MTP layer lease is
+attached (the MTP-aware `truncate_mtp_layer()` is the correct call), and the
+draft context then disagrees with the shared MTP cache's token count. The
+image therefore defaults to `KV_STREAM_RS_ROLLBACK=0`
+(`--no-kv-stream-rs-rollback`, checkpoint rollback), which is stable at the
+24–28 t/s above. v0.9.0 ran 28–33 t/s with snapshots; set
+`KV_STREAM_RS_ROLLBACK=1` to re-test once the lease/ordering fix lands.
 
 ### Patch provenance (v0.9.0 / b12110)
 
