@@ -1305,7 +1305,7 @@ index 97608ef17..aab8e24bc 100644
      }
  
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index a7bd22112..965408ddb 100644
+index a7bd22112..499c7f892 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
 @@ -10,6 +10,11 @@
@@ -1518,7 +1518,16 @@ index a7bd22112..965408ddb 100644
          if (chain_heads) {
              llama_set_nextn_layer_offset(ctx_dft, 0); // restore default for non-draft decodes
          }
-@@ -2029,30 +2100,32 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -2025,34 +2096,41 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+             if (i_h != n_rows - 1) {
+                 llama_get_embeddings_nextn_rows(params.ctx_tgt, verify_row0[seq_id] + i_h, 1, pending_h[seq_id].data());
+             }
++            // a rejected draft still has to retire the adaptive MTP KV lease, otherwise the
++            // next tail trim finds the streamed cache with an MTP layer attached and refuses
++            if (n_accepted + 1 < n_rows && !llama_kv_stream_mtp_release(params.ctx_tgt)) {
++                SPC_ERR("%s", "failed to release the rejected adaptive MTP KV lease\n");
++            }
+             return;
          }
          const size_t row_bytes = (size_t) n_embd * sizeof(float);
          std::memcpy(pending_h[seq_id].data(), verify_h[seq_id].data() + (size_t) i_h * n_embd, row_bytes);
@@ -1567,7 +1576,7 @@ index a7bd22112..965408ddb 100644
  };
  
  // state of self-speculation (simple implementation, not ngram-map)
-@@ -2787,6 +2860,16 @@ common_params common_base_params_to_speculative(const common_params & params) {
+@@ -2787,6 +2865,16 @@ common_params common_base_params_to_speculative(const common_params & params) {
  
      result.cache_type_k  = params_spec.cache_type_k;
      result.cache_type_v  = params_spec.cache_type_v;
@@ -1584,7 +1593,7 @@ index a7bd22112..965408ddb 100644
      result.n_outputs_max = params.n_parallel;
      result.n_outputs_max_per_seq = 1;
  
-@@ -2819,11 +2902,25 @@ common_params common_base_params_to_speculative(const common_params & params) {
+@@ -2819,11 +2907,25 @@ common_params common_base_params_to_speculative(const common_params & params) {
  
  struct common_speculative_init_result::impl {
      impl() = default;
@@ -1611,7 +1620,7 @@ index a7bd22112..965408ddb 100644
  };
  
  common_speculative_init_result::common_speculative_init_result(
-@@ -2835,6 +2932,18 @@ common_speculative_init_result::common_speculative_init_result(
+@@ -2835,6 +2937,18 @@ common_speculative_init_result::common_speculative_init_result(
      const bool spec_mtp = std::find(params.speculative.types.begin(),
                                      params.speculative.types.end(),
                                      COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != params.speculative.types.end();
@@ -1630,7 +1639,7 @@ index a7bd22112..965408ddb 100644
  
      auto mparams = common_model_params_to_llama(params);
      auto cparams = common_context_params_to_llama(params);
-@@ -2850,10 +2959,29 @@ common_speculative_init_result::common_speculative_init_result(
+@@ -2850,10 +2964,29 @@ common_speculative_init_result::common_speculative_init_result(
      //       the extra memory for small models is likely negligible?
      cparams.n_rs_seq  = 0;
      cparams.ctx_other = ctx_tgt;
@@ -1660,7 +1669,7 @@ index a7bd22112..965408ddb 100644
          LOG_INF("%s: loading draft model '%s'\n", __func__, model_path.c_str());
  
          llama_model * model_dft = common_model_load(params.speculative.draft.mparams.get_paths(), mparams);
-@@ -2864,7 +2992,17 @@ common_speculative_init_result::common_speculative_init_result(
+@@ -2864,7 +2997,17 @@ common_speculative_init_result::common_speculative_init_result(
  
          pimpl->model.reset(model_dft);
  
@@ -1679,7 +1688,7 @@ index a7bd22112..965408ddb 100644
          if (ctx_dft == nullptr) {
              LOG_ERR("%s: failed to create MTP context\n", __func__);
              return;
-@@ -2884,6 +3022,21 @@ common_speculative_init_result::common_speculative_init_result(
+@@ -2884,6 +3027,21 @@ common_speculative_init_result::common_speculative_init_result(
  
          pimpl->context.reset(ctx_dft);
      }
@@ -1701,7 +1710,7 @@ index a7bd22112..965408ddb 100644
  }
  
  common_speculative_init_result::~common_speculative_init_result() = default;
-@@ -3076,6 +3229,9 @@ void common_speculative_begin(common_speculative * spec, llama_seq_id seq_id, co
+@@ -3076,6 +3234,9 @@ void common_speculative_begin(common_speculative * spec, llama_seq_id seq_id, co
          return;
      }
  
@@ -1711,7 +1720,7 @@ index a7bd22112..965408ddb 100644
      for (auto & impl : spec->impls) {
          common_time_meas tm(impl->t_begin_us, !impl->gen_perf);
          impl->begin(seq_id, prompt);
-@@ -3107,10 +3263,12 @@ void common_speculative_draft(common_speculative * spec) {
+@@ -3107,10 +3268,12 @@ void common_speculative_draft(common_speculative * spec) {
      {
          int n_drafting = 0;
  
@@ -1725,7 +1734,7 @@ index a7bd22112..965408ddb 100644
                  n_drafting++;
              }
          }
-@@ -3248,6 +3406,24 @@ void common_speculative_set_state(common_speculative * spec, llama_seq_id seq_id
+@@ -3248,6 +3411,24 @@ void common_speculative_set_state(common_speculative * spec, llama_seq_id seq_id
      }
  }
  
@@ -1750,7 +1759,7 @@ index a7bd22112..965408ddb 100644
  void common_speculative_print_stats(const common_speculative * spec) {
      if (spec == nullptr) {
          return;
-@@ -3282,13 +3458,14 @@ void common_speculative_print_stats(const common_speculative * spec) {
+@@ -3282,13 +3463,14 @@ void common_speculative_print_stats(const common_speculative * spec) {
              str_stats = ", #mean acc len = " + oss.str() + ", #acc rate/pos = (" + tmp.str() + ")";
          }
  
@@ -18089,7 +18098,7 @@ index 65aba2af7..abc35191d 100644
      ~llama_kv_cache_iswa() = default;
  
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index 4ec7fb89c..bafb4b08a 100644
+index 4ec7fb89c..2db1a488d 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
 @@ -4,6 +4,15 @@
@@ -18589,7 +18598,7 @@ index 4ec7fb89c..bafb4b08a 100644
              auto & ctx = ctx_map[buft];
              if (!ctx) {
                  ggml_init_params params = { 2*layers.size()*ggml_tensor_overhead(), nullptr, true };
-@@ -424,20 +825,76 @@ void llama_kv_cache::init_rotation(const char * name_tag) {
+@@ -424,20 +825,91 @@ void llama_kv_cache::init_rotation(const char * name_tag) {
      }
  }
  
@@ -18655,7 +18664,22 @@ index 4ec7fb89c..bafb4b08a 100644
 +        auto & cells = v_cells[0];
 +        const bool full = p0 <= 0 && (p1 < 0 || p1 > cells.seq_pos_max(0));
 +        if (keep == kv_stream->tokens() && !full) return true;
-+        if (!(keep ? kv_stream->truncate(keep) : kv_stream->reset(false))) return false;
++        // A live MTP layer lease makes the plain truncate refuse; the lease is
++        // re-acquired for the next draft, so release it and truncate the real cache.
++        bool truncated;
++        if (!keep) {
++            truncated = kv_stream->reset(false);
++        } else if (!kv_stream->truncate(keep)) {
++            truncated = kv_stream->has_mtp_layer() &&
++                kv_stream->release_mtp_layer() && kv_stream->truncate(keep);
++            if (!truncated) {
++                LLAMA_LOG_DEBUG("%s: stream truncate refused keep=%zu tokens=%zu\n", __func__, keep, kv_stream->tokens());
++                return false;
++            }
++        } else {
++            truncated = true;
++        }
++        if (!truncated) return false;
 +        if (!keep) cells.reset();
 +        else {
 +            const uint32_t end = cells.used_max_p1();
@@ -18667,7 +18691,7 @@ index 4ec7fb89c..bafb4b08a 100644
      // TODO: refactor [TAG_KV_CACHE_SHARE_CELLS]
      if (other) {
          return true;
-@@ -453,6 +910,12 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+@@ -453,6 +925,12 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
      if (p1 < 0) {
          p1 = std::numeric_limits<llama_pos>::max();
      }
@@ -18680,7 +18704,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      if (seq_id >= 0) {
          auto & cells = v_cells[seq_to_stream[seq_id]];
-@@ -741,12 +1204,20 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
+@@ -741,12 +1219,20 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
  }
  
  std::map<ggml_backend_buffer_type_t, size_t> llama_kv_cache::memory_breakdown() const {
@@ -18704,7 +18728,7 @@ index 4ec7fb89c..bafb4b08a 100644
      return ret;
  }
  
-@@ -791,6 +1262,7 @@ llama_memory_context_ptr llama_kv_cache::init_full() {
+@@ -791,6 +1277,7 @@ llama_memory_context_ptr llama_kv_cache::init_full() {
  
  llama_memory_context_ptr llama_kv_cache::init_update(llama_context * lctx, bool optimize) {
      GGML_UNUSED(optimize);
@@ -18712,7 +18736,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      bool do_shift = get_has_shift();
  
-@@ -799,6 +1271,7 @@ llama_memory_context_ptr llama_kv_cache::init_update(llama_context * lctx, bool
+@@ -799,6 +1286,7 @@ llama_memory_context_ptr llama_kv_cache::init_update(llama_context * lctx, bool
  
  llama_kv_cache::slot_info_vec_t llama_kv_cache::prepare(const std::vector<llama_ubatch> & ubatches) {
      llama_kv_cache::slot_info_vec_t res;
@@ -18720,7 +18744,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      struct state_t {
          slot_info sinfo; // slot info for the ubatch
-@@ -1238,6 +1711,7 @@ void llama_kv_cache::apply_ubatch(const slot_info & sinfo, const llama_ubatch &
+@@ -1238,6 +1726,7 @@ void llama_kv_cache::apply_ubatch(const slot_info & sinfo, const llama_ubatch &
  }
  
  bool llama_kv_cache::get_can_shift() const {
@@ -18728,7 +18752,7 @@ index 4ec7fb89c..bafb4b08a 100644
      // Step35 uses per-layer RoPE dims; K-shift assumes a single global n_rot.
      if (model.arch == LLM_ARCH_STEP35) {
          return false;
-@@ -1248,6 +1722,53 @@ bool llama_kv_cache::get_can_shift() const {
+@@ -1248,6 +1737,53 @@ bool llama_kv_cache::get_can_shift() const {
      return true;
  }
  
@@ -18782,7 +18806,7 @@ index 4ec7fb89c..bafb4b08a 100644
  uint32_t llama_kv_cache::get_size() const {
      const auto & cells = v_cells[seq_to_stream[0]];
  
-@@ -1297,6 +1818,12 @@ ggml_tensor * llama_kv_cache::get_k_storage(int32_t il) const {
+@@ -1297,6 +1833,12 @@ ggml_tensor * llama_kv_cache::get_k_storage(int32_t il) const {
      return layers[ikv].k;
  }
  
@@ -18795,7 +18819,7 @@ index 4ec7fb89c..bafb4b08a 100644
  const llama_kv_cells & llama_kv_cache::get_cells(llama_seq_id seq_id) const {
      GGML_ASSERT(seq_id >= 0 && (size_t) seq_id < seq_to_stream.size());
  
-@@ -1421,7 +1948,7 @@ uint32_t llama_kv_cache::get_n_kv_rows(const llama_ubatch & ubatch) const {
+@@ -1421,7 +1963,7 @@ uint32_t llama_kv_cache::get_n_kv_rows(const llama_ubatch & ubatch) const {
  ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const {
      const int32_t ikv = map_layer_ids.at(il);
  
@@ -18804,7 +18828,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      const uint64_t kv_size      = get_size();
      const uint64_t n_embd_k_gqa = k->ne[0];
-@@ -1441,7 +1968,7 @@ ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_k
+@@ -1441,7 +1983,7 @@ ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_k
  ggml_tensor * llama_kv_cache::get_v(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const {
      const int32_t ikv = map_layer_ids.at(il);
  
@@ -18813,7 +18837,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      const uint64_t kv_size      = get_size();
      const uint64_t n_embd_v_gqa = v->ne[0];
-@@ -1495,11 +2022,12 @@ ggml_tensor * llama_kv_cache::get_v_scale(int32_t il) const {
+@@ -1495,11 +2037,12 @@ ggml_tensor * llama_kv_cache::get_v_scale(int32_t il) const {
  }
  
  ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggml_tensor * k_idxs, int32_t il, const slot_info & sinfo) const {
@@ -18827,7 +18851,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      const int64_t n_embd_head = k_cur->ne[0];
      const int64_t n_head      = k_cur->ne[1];
-@@ -1530,11 +2058,12 @@ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggm
+@@ -1530,11 +2073,12 @@ ggml_tensor * llama_kv_cache::cpy_k(ggml_context * ctx, ggml_tensor * k_cur, ggm
  }
  
  ggml_tensor * llama_kv_cache::cpy_v(ggml_context * ctx, ggml_tensor * v_cur, ggml_tensor * v_idxs, int32_t il, const slot_info & sinfo) const {
@@ -18841,7 +18865,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      const int64_t n_embd_head = v_cur->ne[0];
      const int64_t n_head      = v_cur->ne[1];
-@@ -1964,8 +2493,6 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
+@@ -1964,8 +2508,6 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
              causal_attn = swa_type != LLAMA_SWA_TYPE_NONE;
          }
  
@@ -18850,7 +18874,7 @@ index 4ec7fb89c..bafb4b08a 100644
          const args_set_input_attn_mask args = {
              /*.hparams          =*/ hparams,
              /*.ubatch           =*/ ubatch,
-@@ -1985,11 +2512,26 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
+@@ -1985,11 +2527,26 @@ void llama_kv_cache::set_input_attn_mask(const llm_attn_mask & attn_mask, const
          } else {
              set_input_attn_mask_impl<float>(args, (float *) dst->data, causal_attn);
          }
@@ -18880,7 +18904,7 @@ index 4ec7fb89c..bafb4b08a 100644
  }
  
  void llama_kv_cache::set_input_pos_bucket(ggml_tensor * dst, const llama_ubatch * ubatch) const {
-@@ -2353,6 +2895,9 @@ const slot_info_vec_t *   sinfos_in) {
+@@ -2353,6 +2910,9 @@ const slot_info_vec_t *   sinfos_in) {
              if (sinfos_in && !(*sinfos_in)[s].empty()) {
                  throw std::runtime_error("failed to restore kv cache: mirrored cache holds cells this one does not");
              }
@@ -18890,7 +18914,7 @@ index 4ec7fb89c..bafb4b08a 100644
              continue;
          }
  
-@@ -2365,6 +2910,74 @@ const slot_info_vec_t *   sinfos_in) {
+@@ -2365,6 +2925,74 @@ const slot_info_vec_t *   sinfos_in) {
  
          try {
              res = res && state_read_data(io, strm, cell_count, sinfo);
@@ -18965,7 +18989,7 @@ index 4ec7fb89c..bafb4b08a 100644
          } catch (...) {
              res = false;
          }
-@@ -2517,6 +3130,7 @@ void llama_kv_cache::state_write_data(llama_io_write_i & io, const cell_ranges_t
+@@ -2517,6 +3145,7 @@ void llama_kv_cache::state_write_data(llama_io_write_i & io, const cell_ranges_t
  bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32_t cell_count, slot_info & sinfo, llama_seq_id dest_seq_id, const slot_info * sinfo_in) {
      auto & cells = v_cells[strm];
      auto & head  = v_heads[strm];
@@ -18973,7 +18997,7 @@ index 4ec7fb89c..bafb4b08a 100644
  
      if (dest_seq_id != -1) {
          // single sequence
-@@ -2546,7 +3160,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
+@@ -2546,7 +3175,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
              io.read(&pos,      sizeof(pos));
              io.read(&n_seq_id, sizeof(n_seq_id));
  
@@ -18982,7 +19006,7 @@ index 4ec7fb89c..bafb4b08a 100644
                  LLAMA_LOG_ERROR("%s: invalid seq_id-agnostic kv cell\n", __func__);
                  return false;
              }
-@@ -2655,6 +3269,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
+@@ -2655,6 +3284,7 @@ bool llama_kv_cache::state_read_meta(llama_io_read_i & io, uint32_t strm, uint32
              io.read(&pos,      sizeof(pos));
              io.read(&n_seq_id, sizeof(n_seq_id));
  
@@ -18990,7 +19014,7 @@ index 4ec7fb89c..bafb4b08a 100644
              cells.pos_set(i, pos);
  
              if (has_cell_ext()) {
-@@ -3057,6 +3672,61 @@ uint32_t llama_kv_cache_context::get_n_kv_rows() const {
+@@ -3057,6 +3687,61 @@ uint32_t llama_kv_cache_context::get_n_kv_rows() const {
      return n_kv_rows;
  }
  
@@ -19052,7 +19076,7 @@ index 4ec7fb89c..bafb4b08a 100644
  ggml_type llama_kv_cache_context::type_k() const {
      return kv->type_k();
  }
-@@ -3118,7 +3788,21 @@ void llama_kv_cache_context::set_input_v_idxs(ggml_tensor * dst, const llama_uba
+@@ -3118,7 +3803,21 @@ void llama_kv_cache_context::set_input_v_idxs(ggml_tensor * dst, const llama_uba
  }
  
  void llama_kv_cache_context::set_input_attn_mask(const llm_attn_mask & attn_mask, const llama_ubatch * ubatch, bool causal_attn) const {

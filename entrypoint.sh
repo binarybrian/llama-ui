@@ -251,13 +251,11 @@ if [[ -n "${MMPROJ_PATH}" ]]; then
   esac
 fi
 
-# KV_STREAM_RS_ROLLBACK=1 uses the recurrent-state snapshot rollback
+# KV_STREAM_RS_ROLLBACK=1 (default) uses the recurrent-state snapshot rollback
 # (n_rs_seq = spec depth) so rejected drafts roll back without a checkpoint.
 # 0 passes --no-kv-stream-rs-rollback: no host spill, the server falls back to
-# checkpoint-based rollback. Default 0: the snapshot rollback path aborts on
-# v1.0.0 (rejected-draft tail trim hits a stale/pending rollback slot).
-# Set 1 to re-enable snapshots once that path is fixed.
-KV_STREAM_RS_ROLLBACK="${KV_STREAM_RS_ROLLBACK:-0}"
+# checkpoint-based rollback (slower; keep only as an escape hatch).
+KV_STREAM_RS_ROLLBACK="${KV_STREAM_RS_ROLLBACK:-1}"
 if [[ "${KV_STREAM_RS_ROLLBACK}" == "0" || "${KV_STREAM_RS_ROLLBACK}" == "off" ]]; then
   if { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--no-kv-stream-rs-rollback"; then
     base_args+=( --no-kv-stream-rs-rollback )
