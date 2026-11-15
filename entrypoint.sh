@@ -26,6 +26,9 @@ HOST="${HOST:-0.0.0.0}"
 # CORS_ORIGINS to allow LAN callers.
 AGENT="${AGENT:-1}"
 CORS_ORIGINS="${CORS_ORIGINS-}"
+# Optional API key; unset/empty = unauthenticated server (see the v1.0.0
+# security gate below). Declared with ${VAR-} so `set -u` never trips.
+API_KEY="${API_KEY-}"
 
 # Sampling defaults: Qwen3.8-27B recommended thinking-mode settings
 # (https://huggingface.co/byteshape/Qwen3.8-27B-GGUF); all overridable via env.
@@ -246,6 +249,20 @@ if [[ -n "${MMPROJ_PATH}" ]]; then
     on|1)  base_args+=( --mmproj-offload ) ;;
     off|0) base_args+=( --no-mmproj-offload ) ;;
   esac
+fi
+
+# KV_STREAM_RS_ROLLBACK=1 uses the recurrent-state snapshot rollback
+# (n_rs_seq = spec depth) so rejected drafts roll back without a checkpoint.
+# 0 passes --no-kv-stream-rs-rollback: no host spill, the server falls back to
+# checkpoint-based rollback. Default 0: the snapshot rollback path aborts on
+# v1.0.0 (rejected-draft tail trim hits a stale/pending rollback slot).
+# Set 1 to re-enable snapshots once that path is fixed.
+KV_STREAM_RS_ROLLBACK="${KV_STREAM_RS_ROLLBACK:-0}"
+if [[ "${KV_STREAM_RS_ROLLBACK}" == "0" || "${KV_STREAM_RS_ROLLBACK}" == "off" ]]; then
+  if { /usr/local/bin/llama-server --help 2>&1 || true; } | grep -q -- "--no-kv-stream-rs-rollback"; then
+    base_args+=( --no-kv-stream-rs-rollback )
+    echo "KV_STREAM_RS_ROLLBACK=0: using checkpoint-based draft rollback (no recurrent snapshots)"
+  fi
 fi
 
 # Print the full llama-server command line so docker logs shows exactly
