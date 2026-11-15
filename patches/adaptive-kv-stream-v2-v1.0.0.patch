@@ -35691,10 +35691,76 @@ index 7c75ab55e..cc83c8e27 100644
                  }
              }
 diff --git a/src/models/delta-net-base.cpp b/src/models/delta-net-base.cpp
-index 45b2de4bb..e3f2f2d45 100644
+index 45b2de4bb..2b747d95f 100644
 --- a/src/models/delta-net-base.cpp
 +++ b/src/models/delta-net-base.cpp
-@@ -140,13 +140,35 @@ ggml_tensor * llm_build_delta_net_base::build_recurrent_attn(
+@@ -58,6 +58,7 @@ ggml_tensor * llm_build_delta_net_base::build_conv_state(
+         int64_t              conv_channels,
+         int                  il) {
+     const int64_t n_seqs = ubatch.n_seqs;
++    const auto * mctx_cur = inp->mctx;
+ 
+     ggml_tensor * conv_states = build_rs(inp, conv_states_all, hparams.n_embd_r(), n_seqs);
+     cb(conv_states, "conv_states", il);
+@@ -71,7 +72,56 @@ ggml_tensor * llm_build_delta_net_base::build_conv_state(
+     ggml_tensor * conv_input = ggml_concat(ctx0, conv_states, qkv_mixed, 0);
+     cb(conv_input, "conv_input", il);
+ 
+-    build_conv_state_store(inp, conv_states_all, conv_input, conv_kernel_size - 1, 0);
++    const size_t row_size = ggml_row_size(conv_states_all->type,
++            (conv_kernel_size - 1) * conv_channels);
++    const size_t mem_size = mctx_cur->get_size();
++    const size_t kv_head  = mctx_cur->get_head();
++
++    if (cparams.n_rs_seq == 0) {
++        build_conv_state_store(inp, conv_states_all, conv_input, conv_kernel_size - 1, 0);
++        return conv_input;
++    }
++
++    // [TAG_RECURRENT_ROLLBACK_SPLITS]
++    // the streamed KV host spill keeps the rollback snapshots on the host, so the
++    // device recurrent cache holds one slot set (see llama_memory_recurrent);
++    // slot 0 is the live state, slots > 0 are published/staged snapshots.
++    const int64_t K = (int64_t) cparams.n_rs_seq + 1;
++    std::vector<ggml_tensor *> staged_copies;
++    for (int64_t t = 1; t <= K; ++t) {
++        const int64_t s_idx  = std::max<int64_t>(0, conv_input->ne[0] - conv_states->ne[0] - K + t);
++        const int64_t s_slot = K - t;
++
++        ggml_tensor * conv_state_last =
++            ggml_view_3d(ctx0, conv_input,
++                    conv_kernel_size - 1, conv_channels, n_seqs,
++                    conv_input->nb[1], conv_input->nb[2],
++                    ggml_row_size(conv_input->type, s_idx));
++
++        if (mctx_cur->staged_publication_enabled() && s_slot > 0) {
++            auto * stage = mctx_cur->staging_tensor(il, false, uint32_t(s_slot));
++            auto * publication = mctx_cur->publication_tensor(il, false, uint32_t(s_slot));
++            GGML_ASSERT(stage && publication);
++            auto * staged = ggml_cpy(ctx0, conv_state_last, stage);
++            staged_copies.push_back(staged);
++            res->add_recurrent_snapshot({publication, uint32_t(il), uint32_t(s_slot), false, 0});
++        } else {
++            ggml_tensor * conv_state_update = mctx_cur->spill_enabled() && s_slot > 0
++                ? ggml_new_tensor_2d(ctx0, conv_states_all->type,
++                        (conv_kernel_size - 1) * conv_channels, n_seqs)
++                : ggml_view_2d(ctx0, conv_states_all,
++                    (conv_kernel_size - 1) * conv_channels, n_seqs,
++                    conv_states_all->nb[1],
++                    (s_slot * mem_size + kv_head) * row_size);
++            ggml_build_forward_expand(gf, ggml_cpy(ctx0, conv_state_last, conv_state_update));
++            if (mctx_cur->spill_enabled() && s_slot > 0) {
++                res->add_recurrent_snapshot({conv_state_update, uint32_t(il), uint32_t(s_slot), false, 0});
++            }
++        }
++    }
++    if (!staged_copies.empty()) {
++        GGML_ASSERT(mctx_cur->publish_staged(ctx0, gf, il, false, staged_copies));
++    }
+ 
+     return conv_input;
+ }
+@@ -140,13 +190,35 @@ ggml_tensor * llm_build_delta_net_base::build_recurrent_attn(
          ggml_row_size(gdn_out->type, state_size_per_snap),
          ggml_row_size(gdn_out->type, attn_score_elems));
  
